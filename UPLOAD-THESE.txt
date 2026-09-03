@@ -1,0 +1,5 @@
+Upload the CONTENTS of this folder (not the folder itself) so that
+index.html lands at the top level of the repository.
+
+This version contains NO training data. Never add a backup .json
+file here - backups stay private, on your phone and your PC.
