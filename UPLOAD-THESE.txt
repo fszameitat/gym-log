@@ -1,5 +1,15 @@
 Upload the CONTENTS of this folder (not the folder itself) so that
 index.html lands at the top level of the repository.
 
+This is v5. The service worker cache name is gymlog-v5, so phones
+that already have v4 installed will pick this up automatically on
+their next online load. If a phone still shows the old version,
+close every tab of the app and reopen it once with signal.
+
+New in v5:
+  js/coach.js              progression rules
+  js/csv.js                spreadsheet export
+  js/views/coach-block.js  how a suggestion is drawn
+
 This version contains NO training data. Never add a backup .json
 file here - backups stay private, on your phone and your PC.

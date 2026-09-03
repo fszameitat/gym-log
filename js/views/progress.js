@@ -27,11 +27,11 @@ export function view(state) {
       <div class="tile"><b>${sets.filter(s => s.done === true).length}</b><span>sets logged</span></div>
     </section>
 
-    <section class="card"><h2>Weekly volume</h2><div class="chart">${barChart(weeks, { width: 340, height: 190 })}</div></section>
+    <section class="card"><h2>Weekly volume</h2><div class="chart">${barChart(weeks, { width: 340, height: 190, label: 'Volume per week in kilograms', empty: 'Finish a workout to start this chart' })}</div></section>
 
-    <section class="card"><h2>Volume trend, 3 week average</h2><div class="chart">${lineChart(trend, { width: 340, height: 190, color: '#22c55e' })}</div></section>
+    <section class="card"><h2>Volume trend, 3 week average</h2><div class="chart">${lineChart(trend, { width: 340, height: 190, label: 'Three week average volume', empty: 'Three weeks of training fills this in' })}</div></section>
 
-    <section class="card"><h2>Workouts per week</h2><div class="chart">${barChart(perWeek, { width: 340, height: 160, color: '#f59e0b' })}</div></section>
+    <section class="card"><h2>Workouts per week</h2><div class="chart">${barChart(perWeek, { width: 340, height: 160, label: 'Workouts per week', empty: 'Finish a workout to start this chart' })}</div></section>
 
     <section class="card"><h2>Top lifts</h2><ul class="list">
       ${leaderboard.length > 0 ? leaderboard.map(e => `
@@ -41,9 +41,11 @@ export function view(state) {
 
     <section class="card"><h2>Backup</h2>
       <p class="muted">Your data lives in this browser, tied to this exact web address — it does not follow you to a different one. Export before changing where the app is hosted, and now and then anyway.</p>
+      <p class="muted">The <b>backup</b> is the file that restores everything. The <b>spreadsheet</b> is a read-only copy, one row per set, for Excel or Numbers.</p>
       <div class="form">
         <button class="primary" data-act="export-backup">Export backup</button>
         <button class="ghost" data-act="pick-backup">Restore backup</button>
+        <button class="ghost" data-act="export-csv">Export spreadsheet (CSV)</button>
         <input type="file" id="backup-file" data-field="backup-file" accept="application/json,.json" hidden>
       </div>
       <h2 style="margin-top:14px">Danger zone</h2>

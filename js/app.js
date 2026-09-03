@@ -3,6 +3,7 @@ import * as db from './db.js';
 import { createRestTimer } from './timer.js';
 import { clock } from './fmt.js';
 import { toKg, hasReps } from './units.js';
+import { buildRows, toCsv } from './csv.js';
 import { SEED_EXERCISES } from './seed-history.js';
 import { view as homeView } from './views/home.js';
 import { view as routinesView } from './views/routines.js';
@@ -19,6 +20,55 @@ export const state = {
   ready: false,
 };
 
+/* ---------- rest: how long, keeping the screen on, and the nudge at zero ---------- */
+const DEFAULT_REST_SECONDS = 120;
+
+function restSecondsFor(exerciseId) {
+  const ex = state.exercises.find((e) => e.id === exerciseId);
+  const v = ex ? Number(ex.restSeconds) : NaN;
+  return Number.isFinite(v) && v > 0 ? Math.round(v) : DEFAULT_REST_SECONDS;
+}
+
+// A phone left alone on a bench locks its screen after 30 seconds and the countdown is gone
+// when you look back. The lock is held only while the timer runs, never for the whole workout.
+let wakeLock = null;
+async function acquireWakeLock() {
+  try {
+    if (!('wakeLock' in navigator) || wakeLock) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch { /* denied, unsupported, or the tab is hidden — the timer works regardless */ }
+}
+function releaseWakeLock() {
+  try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch { /* already gone */ }
+}
+// Re-acquire after the tab comes back: the browser drops the lock whenever the page hides.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.rest.running) acquireWakeLock();
+});
+
+/** A short beep and a buzz when rest is over. No audio file: a PWA that must work offline
+ *  should not ship one, and a synthesised tone needs no network and no cache entry. */
+function restFinishedCue() {
+  try { if (typeof navigator.vibrate === 'function') navigator.vibrate([200, 100, 200]); } catch { /* iOS */ }
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.5);
+    setTimeout(() => { try { ctx.close(); } catch { /* closed already */ } }, 900);
+  } catch { /* autoplay policy — the vibration and the badge still land */ }
+}
+
 // The timer fires every 250ms. Re-rendering the whole screen that often destroys the DOM under
 // the user's finger and drops taps mid-workout, so only a running/stopped transition triggers a
 // real render; plain ticks just repaint the two clock elements in place.
@@ -27,6 +77,10 @@ const restTimer = createRestTimer((s) => {
   const transition = s.running !== lastRestRunning;
   lastRestRunning = s.running;
   state.rest = s;
+  if (transition) {
+    if (s.running) acquireWakeLock();
+    else { releaseWakeLock(); if (s.finished) restFinishedCue(); }
+  }
   paintRestBadge();
   const live = document.querySelector('.rest.live b');
   if (live) live.textContent = clock(s.remaining);
@@ -174,6 +228,26 @@ async function exportBackup() {
   return sessions.length;
 }
 
+/** Every set as one spreadsheet row. Semicolon-delimited with a UTF-8 BOM, because that is
+ *  what German Excel opens without a five-step import wizard. The JSON backup is for moving
+ *  data between installs; this one is for looking at it somewhere else. */
+async function exportCsv() {
+  const [exercises, routines, sessions, sets] = await Promise.all([
+    db.all('exercises'), db.all('routines'), db.all('sessions'), db.all('sets'),
+  ]);
+  const rows = buildRows({ exercises, routines, sessions, sets });
+  const blob = new Blob(['\ufeff' + toCsv(rows, ';')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `gym-log-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return rows.length;
+}
+
 /** Replaces the database with a backup file. This is the ONLY way training data moves
  *  between devices or web addresses — a PWA's storage belongs to one origin and never
  *  follows you, and nothing personal is baked into the app itself. */
@@ -316,7 +390,7 @@ const ACTIONS = {
     if (!s) return;
     const nowDone = !s.done;
     await updateSet(s.id, { done: nowDone, at: Date.now() });
-    if (nowDone) restTimer.start(120);
+    if (nowDone) restTimer.start(restSecondsFor(s.exerciseId));
     await loadAll(); render();
   },
   async 'session-add-exercise'(el) {
@@ -339,13 +413,35 @@ const ACTIONS = {
     await loadAll(); render();
   },
 
-  'rest-start'(el) { restTimer.start(num(el.dataset.secs, 120)); },
+  /** Writes the coach's target into every set of this exercise you have not ticked off yet.
+   *  Deliberately leaves finished sets alone — the log is a record of what happened. */
+  async 'apply-suggestion'(el) {
+    const sid = el.dataset.sid;
+    const eid = el.dataset.eid;
+    const load = Math.max(0, num(el.dataset.load, 0));
+    const repsRaw = el.dataset.reps;
+    const reps = repsRaw === '' || repsRaw == null ? null : Math.max(0, Math.round(num(repsRaw, 0)));
+    const targets = setsFor(sid).filter((x) => x.exerciseId === eid && !x.done);
+    for (const t of targets) {
+      t.weight = load;
+      if (reps !== null) t.reps = reps;
+      await db.put('sets', t);
+    }
+    await loadAll(); render();
+  },
+
+  'rest-start'(el) { restTimer.start(num(el.dataset.secs, DEFAULT_REST_SECONDS)); },
   'rest-stop'() { restTimer.stop(); render(); },
   'rest-add'(el) { restTimer.addSeconds(num(el.dataset.secs, 30)); },
 
   async 'export-backup'() {
     const n = await exportBackup();
     window.alert(`Backup downloaded — ${n} sessions.\n\nKeep this file. Your training data lives only in this browser, on this exact web address, so a backup is the only way to move it somewhere else.`);
+  },
+
+  async 'export-csv'() {
+    const n = await exportCsv();
+    window.alert(`Spreadsheet downloaded — ${n} sets.\n\nOpens in Excel, Numbers or LibreOffice. This is a copy to look at; use the JSON backup to move your data to another device.`);
   },
 
   'pick-backup'() {
@@ -414,6 +510,13 @@ document.addEventListener('change', async (ev) => {
     const e = exerciseById(el.dataset.id);
     if (e) {
       e.kgPerStufe = Math.max(0.1, num(el.value, 5));
+      await db.put('exercises', e);
+      await loadAll(); render();
+    }
+  } else if (field === 'rest-seconds') {
+    const e = exerciseById(el.dataset.id);
+    if (e) {
+      e.restSeconds = Math.min(600, Math.max(5, Math.round(num(el.value, DEFAULT_REST_SECONDS))));
       await db.put('exercises', e);
       await loadAll(); render();
     }

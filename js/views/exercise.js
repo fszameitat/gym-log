@@ -6,6 +6,8 @@ import { exerciseSummary, personalRecords } from '../stats.js';
 import { best1RMByDay, volumeByDay, maxLoadByDay, loadSumByDay } from '../series.js';
 import { lineChart, barChart } from '../charts.js';
 import { unitOf, formatLoad, describeSet, kgPerStufe } from '../units.js';
+import { suggest } from '../coach.js';
+import { coachBlock } from './coach-block.js';
 
 export function view(state) {
   const ex = state.exercises.find(e => e.id === state.route.id);
@@ -26,6 +28,8 @@ export function view(state) {
     + `<p class="muted">${esc(ex.muscleGroup || 'Other')} &middot; measured in ${esc(u.noun)}`
     + (u.id === 'stufe' ? ` (1 St. counted as ${fmtKg(kgPerStufe(ex))} kg)` : '')
     + `</p></section>`;
+
+  html += `<section class="card"><h2>Next session</h2>${coachBlock(suggest(sets, ex), ex, null)}</section>`;
 
   // --- tiles, per unit ---
   if (u.id === 'time') {
@@ -52,14 +56,14 @@ export function view(state) {
 
   // --- charts, per unit ---
   if (u.id === 'time') {
-    html += `<section class="card"><h2>Longest hold</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180 })}</div></section>`;
-    html += `<section class="card"><h2>Total seconds per session</h2><div class="chart">${barChart(loadSumByDay(sets).slice(-12), { width: 340, height: 180, color: '#38bdf8' })}</div></section>`;
+    html += `<section class="card"><h2>Longest hold</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Longest hold in seconds', empty: 'Log a hold to start this chart' })}</div></section>`;
+    html += `<section class="card"><h2>Total seconds per session</h2><div class="chart">${barChart(loadSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Total seconds held per session', empty: 'Log a hold to start this chart' })}</div></section>`;
   } else if (u.id === 'stufe') {
-    html += `<section class="card"><h2>Level reached</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180 })}</div></section>`;
-    html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, color: '#38bdf8' })}</div></section>`;
+    html += `<section class="card"><h2>Level reached</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Highest Stufe reached', empty: 'Log a set to start this chart' })}</div></section>`;
+    html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, label: 'Volume per session in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;
   } else {
-    html += `<section class="card"><h2>Estimated 1RM</h2><div class="chart">${lineChart(best1RMByDay(sets).slice(-14), { width: 340, height: 180 })}</div></section>`;
-    html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, color: '#38bdf8' })}</div></section>`;
+    html += `<section class="card"><h2>Estimated 1RM</h2><div class="chart">${lineChart(best1RMByDay(sets).slice(-14), { width: 340, height: 180, label: 'Estimated one-rep max in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;
+    html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, label: 'Volume per session in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;
   }
 
   html += `<section class="card"><h2>Notes</h2><textarea rows="3" data-field="exercise-notes" data-id="${ex.id}" data-focus="en-${ex.id}" placeholder="Cues, setup, niggles...">${esc(ex.notes || '')}</textarea></section>`;

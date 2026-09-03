@@ -34,6 +34,7 @@ export function view(state) {
         + (u.id === 'kg' ? '' : ` <span class="badge">${esc(u.short)}</span>`)
         + `</a>`
         + `<label class="mini">sets<input type="number" min="1" max="20" value="${ex.defaultSets}" data-field="default-sets" data-id="${ex.id}" data-focus="ds-${ex.id}" inputmode="numeric"></label>`
+        + `<label class="mini">rest<input type="number" min="5" max="600" step="15" value="${Number(ex.restSeconds) > 0 ? Math.round(ex.restSeconds) : 120}" data-field="rest-seconds" data-id="${ex.id}" data-focus="rs-${ex.id}" inputmode="numeric">s</label>`
         + `<button class="del" data-act="delete-exercise" data-id="${ex.id}" aria-label="Delete">&times;</button></li>`;
     });
     html += `</ul></section>`;

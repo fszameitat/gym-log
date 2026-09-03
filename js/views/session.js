@@ -4,8 +4,10 @@
 import { esc, fmtDateTime, fmtVolume, clock } from '../fmt.js';
 import { totalVolume } from '../stats.js';
 import { unitOf } from '../units.js';
+import { suggest } from '../coach.js';
+import { coachBlock } from './coach-block.js';
 
-function block(session, eid, ex, rows) {
+function block(session, eid, ex, rows, tip) {
   const name = ex ? ex.name : 'Removed exercise';
   const u = unitOf(ex);
   const loadLabel = u.short;
@@ -26,6 +28,7 @@ function block(session, eid, ex, rows) {
     : fmtVolume(vol);
 
   return `<section class="card ex"><div class="row"><h2 class="grow"><a href="#/exercise/${eid}">${esc(name)}</a></h2><span class="muted">${summary}</span></div>`
+    + (tip || '')
     + `<table class="sets"><tbody>${body}</tbody></table>`
     + `<button class="ghost" data-act="add-set" data-sid="${session.id}" data-eid="${eid}">+ Add set</button></section>`;
 }
@@ -50,7 +53,12 @@ export function view(state) {
   }
 
   for (const eid of order) {
-    html += block(s, eid, byId.get(eid), sets.filter(x => x.exerciseId === eid));
+    const ex = byId.get(eid);
+    // The advice is for THIS session, so it must look only at what came before it —
+    // feeding today's half-finished sets back in would have the coach chase its own tail.
+    const history = state.sets.filter(x => x.exerciseId === eid && x.sessionId !== s.id);
+    const tip = s.endedAt ? '' : coachBlock(suggest(history, ex), ex, { sessionId: s.id, exerciseId: eid });
+    html += block(s, eid, ex, sets.filter(x => x.exerciseId === eid), tip);
   }
 
   html += `<section class="card"><div class="form"><select id="session-add-select">`
