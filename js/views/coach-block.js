@@ -4,13 +4,21 @@
 import { esc } from '../fmt.js';
 import { unitOf, formatLoad } from '../units.js';
 
-/** "42.5 kg × 8", "St. 3 × 10", "50 s", or null when there is nothing to aim at yet. */
+/** "42.5 kg × 8", "St. 3 × 10", "50 s", "15 reps", or null when there is nothing to aim
+ *  at yet. Bodyweight work has no load at all, so the rep count IS the whole target —
+ *  before v6 this returned null for it and the coach block rendered with no target. */
 export function suggestionTarget(sug, ex) {
-  if (!sug || sug.load === null || sug.load === undefined) return null;
+  if (!sug) return null;
+  const u = unitOf(ex);
+  const reps = Number(sug.reps);
+  if (!u.hasLoad) {
+    return Number.isFinite(reps) && reps > 0 ? `${reps} reps` : null;
+  }
+  if (sug.load === null || sug.load === undefined) return null;
   const load = formatLoad(sug.load, ex);
-  if (!unitOf(ex).hasReps) return load;
-  if (!Number.isFinite(sug.reps) || sug.reps <= 0) return load;
-  return `${load} × ${sug.reps}`;
+  if (!u.hasReps) return load;
+  if (!Number.isFinite(reps) || reps <= 0) return load;
+  return `${load} × ${reps}`;
 }
 
 const LABELS = {
@@ -20,6 +28,7 @@ const LABELS = {
   'deload':     'Next: back off',
   'hold':       'Next: match your best',
   'no-reps':    'Coach',
+  'add-set':    'Next: another set',
 };
 
 /**

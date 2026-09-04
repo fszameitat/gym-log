@@ -1,15 +1,15 @@
 Upload the CONTENTS of this folder (not the folder itself) so that
 index.html lands at the top level of the repository.
 
-This is v5. The service worker cache name is gymlog-v5, so phones
-that already have v4 installed will pick this up automatically on
-their next online load. If a phone still shows the old version,
-close every tab of the app and reopen it once with signal.
+This is v6. The service worker cache is gymlog-v6, so a phone that
+already has v5 picks it up on its next online load.
 
-New in v5:
-  js/coach.js              progression rules
-  js/csv.js                spreadsheet export
-  js/views/coach-block.js  how a suggestion is drawn
+New in v6:
+  js/catalog.js            your gym's 151 exercises, searchable
+  bodyweight + cardio      units, so push-ups and rowing can be logged
+  empty entry boxes        last session's numbers show as a grey ghost
+  deletions stick          the starter library never reappears by itself
 
-This version contains NO training data. Never add a backup .json
-file here - backups stay private, on your phone and your PC.
+This version contains NO training data and NO plan of yours. Your
+FitPlan Pro routine lives in MY-fitplan-routine.json one folder up -
+that file is private. Never add it here.

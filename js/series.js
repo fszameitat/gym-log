@@ -132,3 +132,37 @@ export function loadSumByDay(sets) {
     .map(([key, value]) => ({ key, value: Math.round(value * 100) / 100 }))
     .sort((a, b) => a.key.localeCompare(b.key));
 }
+
+// --- v6: bodyweight work, where reps are the only record ---
+
+/** Best single-set rep count per day. */
+export function bestRepsByDay(sets) {
+  if (!Array.isArray(sets)) return [];
+  const map = new Map();
+  for (const set of sets) {
+    if (!set || set.done !== true) continue;
+    const r = Number(set.reps);
+    if (!Number.isFinite(r) || r <= 0) continue;
+    const key = dayKey(set.at);
+    map.set(key, Math.max(map.get(key) || 0, r));
+  }
+  return Array.from(map.entries())
+    .map(([key, value]) => ({ key, value }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/** Total reps per day — the bodyweight equivalent of volume. */
+export function repsSumByDay(sets) {
+  if (!Array.isArray(sets)) return [];
+  const map = new Map();
+  for (const set of sets) {
+    if (!set || set.done !== true) continue;
+    const r = Number(set.reps);
+    if (!Number.isFinite(r) || r <= 0) continue;
+    const key = dayKey(set.at);
+    map.set(key, (map.get(key) || 0) + r);
+  }
+  return Array.from(map.entries())
+    .map(([key, value]) => ({ key, value }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}

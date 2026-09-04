@@ -2,6 +2,7 @@
 // extended by Claude with a unit picker (kg / Stufe / timed hold) and a Stufe conversion field.
 import { esc } from '../fmt.js';
 import { UNITS, unitOf, kgPerStufe } from '../units.js';
+import { CATALOG, CATALOG_GROUPS } from '../catalog.js';
 
 export function view(state) {
   let html = `<section class="card"><h2>Add exercise</h2><div class="form">`
@@ -14,8 +15,14 @@ export function view(state) {
     + `<button class="primary" data-act="add-exercise">Add</button>`
     + `</div><p class="muted">Pick <b>Stufe</b> for machines with numbered levels, or <b>Seconds held</b> for planks and other timed holds.</p></section>`;
 
+  html += catalogCard(state);
+
+  html += `<section class="card"><h2>Starter library</h2>`
+    + `<p class="muted">Adds the built-in exercises you do not already have. Nothing you have created or renamed is touched, and nothing is added twice.</p>`
+    + `<div class="form"><button class="ghost" data-act="seed-library">Add the starter exercises</button></div></section>`;
+
   if (state.exercises.length === 0) {
-    html += `<section class="card"><p class="muted">No exercises yet.</p></section>`;
+    html += `<section class="card"><p class="muted">No exercises yet — add one above, or use the starter library.</p></section>`;
     return html;
   }
 
@@ -30,12 +37,17 @@ export function view(state) {
     html += `<section class="card"><h2>${esc(group)}</h2><ul class="list">`;
     grouped.get(group).forEach(ex => {
       const u = unitOf(ex);
-      html += `<li><a class="li-t grow" href="#/exercise/${ex.id}">${esc(ex.name)}`
-        + (u.id === 'kg' ? '' : ` <span class="badge">${esc(u.short)}</span>`)
+      // The name gets its own line. Squeezed onto one row with the sets and rest boxes it
+      // was truncated to "Klimmzu" and "Rückenst", which is the one thing you need to read.
+      html += `<li class="ex-row"><a class="li-t" href="#/exercise/${ex.id}">${esc(ex.name)}`
+        + (u.id === 'kg' ? '' : ` <span class="badge">${esc(u.short || u.label)}</span>`)
         + `</a>`
+        + `<div class="ex-controls">`
         + `<label class="mini">sets<input type="number" min="1" max="20" value="${ex.defaultSets}" data-field="default-sets" data-id="${ex.id}" data-focus="ds-${ex.id}" inputmode="numeric"></label>`
         + `<label class="mini">rest<input type="number" min="5" max="600" step="15" value="${Number(ex.restSeconds) > 0 ? Math.round(ex.restSeconds) : 120}" data-field="rest-seconds" data-id="${ex.id}" data-focus="rs-${ex.id}" inputmode="numeric">s</label>`
-        + `<button class="del" data-act="delete-exercise" data-id="${ex.id}" aria-label="Delete">&times;</button></li>`;
+        + `<span class="grow"></span>`
+        + `<button class="del" data-act="delete-exercise" data-id="${ex.id}" aria-label="Delete">&times;</button>`
+        + `</div></li>`;
     });
     html += `</ul></section>`;
   });
@@ -52,4 +64,52 @@ export function view(state) {
   }
 
   return html;
+}
+
+
+/** The gym's full catalogue, searchable. Nothing is added until you tap Add. */
+function catalogCard(state) {
+  const q = String(state.catalogQuery || '').trim().toLowerCase();
+  const group = state.catalogGroup || '';
+  const have = new Set(state.exercises.map(e => String(e.name).toLowerCase()));
+
+  let hits = CATALOG;
+  if (group) hits = hits.filter(c => c.group === group);
+  if (q) hits = hits.filter(c => c.name.toLowerCase().includes(q) || c.group.toLowerCase().includes(q));
+
+  const LIMIT = 40;
+  const shown = hits.slice(0, LIMIT);
+
+  let html = `<section class="card"><h2>Exercise catalogue</h2>`
+    + `<p class="muted">${CATALOG.length} movements from the gym. Search, then add the ones you actually train.</p>`
+    + `<div class="form"><input id="catalog-search" data-field="catalog-search" data-focus="catalog-search" value="${esc(state.catalogQuery || '')}" placeholder="Search — e.g. Latzug, Plank, Kettlebell" autocomplete="off"></div>`
+    + `<div class="chips">`
+    + `<button class="${group ? 'chip' : 'chip on'}" data-act="catalog-group" data-group="">All</button>`
+    + CATALOG_GROUPS.map(g => `<button class="${group === g ? 'chip on' : 'chip'}" data-act="catalog-group" data-group="${esc(g)}">${esc(g)}</button>`).join('')
+    + `</div>`;
+
+  if (hits.length === 0) {
+    html += `<p class="muted">Nothing matches. Add it by hand above — the catalogue is a convenience, not a limit.</p>`;
+  } else {
+    let lastGroup = null;
+    for (const c of shown) {
+      if (c.group !== lastGroup) {
+        lastGroup = c.group;
+        html += `<div class="cat-head"><h3>${esc(c.group)}</h3></div>`;
+      }
+      const already = have.has(c.name.toLowerCase());
+      const u = UNITS[c.unit] || UNITS.kg;
+      html += `<div class="pick${already ? ' have' : ''}">`
+        + `<span class="grow"><span class="li-t">${esc(c.name)}</span><br><span class="li-s">${esc(u.label)} &middot; ${esc(c.level)}</span></span>`
+        + (already
+            ? `<button class="ghost" disabled>Added</button>`
+            : `<button class="ghost" data-act="catalog-add" data-name="${esc(c.name)}">Add</button>`)
+        + `</div>`;
+    }
+    if (hits.length > LIMIT) {
+      html += `<p class="muted">Showing ${LIMIT} of ${hits.length} — keep typing to narrow it down.</p>`;
+    }
+  }
+
+  return html + `</section>`;
 }

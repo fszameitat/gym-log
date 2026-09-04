@@ -3,7 +3,7 @@
 // sense for kilograms, so Stufe shows level progression and timed holds show seconds.
 import { esc, fmtDate, fmtKg, fmtVolume } from '../fmt.js';
 import { exerciseSummary, personalRecords } from '../stats.js';
-import { best1RMByDay, volumeByDay, maxLoadByDay, loadSumByDay } from '../series.js';
+import { best1RMByDay, volumeByDay, maxLoadByDay, loadSumByDay, bestRepsByDay, repsSumByDay } from '../series.js';
 import { lineChart, barChart } from '../charts.js';
 import { unitOf, formatLoad, describeSet, kgPerStufe } from '../units.js';
 import { suggest } from '../coach.js';
@@ -40,6 +40,20 @@ export function view(state) {
       + `<div class="tile"><b>${doneSets.length}</b><span>holds logged</span></div>`
       + `<div class="tile"><b>${Math.round(totalSecs)} s</b><span>total time</span></div>`
       + `<div class="tile"><b>${sessionCount}</b><span>sessions</span></div></section>`;
+  } else if (u.id === 'cardio') {
+    const best = doneSets.reduce((m, s) => Math.max(m, Number(s.weight) || 0), 0);
+    const totalMin = doneSets.reduce((t, s) => t + (Number(s.weight) || 0), 0);
+    html += `<section class="tiles">`
+      + `<div class="tile"><b>${fmtKg(best)} min</b><span>longest</span></div>`
+      + `<div class="tile"><b>${Math.round(totalMin)} min</b><span>total time</span></div>`
+      + `<div class="tile"><b>${doneSets.length}</b><span>pieces</span></div>`
+      + `<div class="tile"><b>${sessionCount}</b><span>sessions</span></div></section>`;
+  } else if (u.id === 'body') {
+    html += `<section class="tiles">`
+      + `<div class="tile"><b>${pr.maxReps}</b><span>best set</span></div>`
+      + `<div class="tile"><b>${sum.totalReps}</b><span>total reps</span></div>`
+      + `<div class="tile"><b>${sum.totalSets}</b><span>sets logged</span></div>`
+      + `<div class="tile"><b>${sessionCount}</b><span>sessions</span></div></section>`;
   } else if (u.id === 'stufe') {
     html += `<section class="tiles">`
       + `<div class="tile"><b>${formatLoad(pr.maxWeight, ex)}</b><span>top level</span></div>`
@@ -58,6 +72,12 @@ export function view(state) {
   if (u.id === 'time') {
     html += `<section class="card"><h2>Longest hold</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Longest hold in seconds', empty: 'Log a hold to start this chart' })}</div></section>`;
     html += `<section class="card"><h2>Total seconds per session</h2><div class="chart">${barChart(loadSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Total seconds held per session', empty: 'Log a hold to start this chart' })}</div></section>`;
+  } else if (u.id === 'cardio') {
+    html += `<section class="card"><h2>Longest piece</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Longest cardio piece in minutes', empty: 'Log a piece to start this chart' })}</div></section>`;
+    html += `<section class="card"><h2>Minutes per session</h2><div class="chart">${barChart(loadSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Cardio minutes per session', empty: 'Log a piece to start this chart' })}</div></section>`;
+  } else if (u.id === 'body') {
+    html += `<section class="card"><h2>Best set</h2><div class="chart">${lineChart(bestRepsByDay(sets).slice(-14), { width: 340, height: 180, label: 'Best single set in reps', empty: 'Log a set to start this chart' })}</div></section>`;
+    html += `<section class="card"><h2>Total reps per session</h2><div class="chart">${barChart(repsSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Total reps per session', empty: 'Log a set to start this chart' })}</div></section>`;
   } else if (u.id === 'stufe') {
     html += `<section class="card"><h2>Level reached</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Highest Stufe reached', empty: 'Log a set to start this chart' })}</div></section>`;
     html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, label: 'Volume per session in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;

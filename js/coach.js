@@ -8,9 +8,13 @@
 // Pure functions only: no DOM, no IndexedDB, no imports.
 
 const DEFAULTS = {
-  kg:    { repMin: 8,  repMax: 12, increment: 2.5, step: 0.5 },
-  stufe: { repMin: 10, repMax: 15, increment: 1,   step: 0.5 },
-  time:  { repMin: 0,  repMax: 0,  increment: 5,   step: 5   },
+  kg:     { repMin: 8,  repMax: 12, increment: 2.5, step: 0.5 },
+  stufe:  { repMin: 10, repMax: 15, increment: 1,   step: 0.5 },
+  time:   { repMin: 0,  repMax: 0,  increment: 5,   step: 5   },
+  // Bodyweight ranges run wider: with no load to add, reps are the only lever, so the
+  // top of the range is where you add a set or pick a harder variation instead.
+  body:   { repMin: 8,  repMax: 20, increment: 1,   step: 1   },
+  cardio: { repMin: 0,  repMax: 0,  increment: 2,   step: 1   },
 };
 
 // A run of this many sessions at one load with no rep gain earns a deload. Four
@@ -36,6 +40,40 @@ export function targetsFor(exercise) {
     }
   }
   return target;
+}
+
+/** Like sessionSummaries, but for exercises that carry no load at all: bodyweight work,
+ *  where the rep count IS the record. Grouping by heaviest set is meaningless there, so
+ *  every completed rep count in the session is kept. */
+export function repSummaries(sets) {
+  if (!Array.isArray(sets)) return [];
+
+  // A session that was ticked off but never had its reps filled in still HAPPENED, so it
+  // is kept with an empty reps array — exactly as a loaded exercise keeps a session that
+  // recorded a weight but no reps. Dropping it would make the coach claim you had never
+  // trained the movement at all.
+  const grouped = new Map();
+  for (const entry of sets) {
+    if (!entry || typeof entry !== 'object' || entry.done !== true) continue;
+    const key = entry.sessionId;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(entry);
+  }
+
+  const out = [];
+  for (const [sessionId, group] of grouped) {
+    const times = group.map(e => Number(e.at)).filter(Number.isFinite);
+    const reps = group.map(e => Number(e.reps)).filter(r => Number.isFinite(r) && r > 0);
+    out.push({
+      sessionId,
+      at: times.length ? Math.min(...times) : 0,
+      load: null,
+      reps,
+      setCount: group.length,
+    });
+  }
+  return out.sort((a, b) =>
+    a.at !== b.at ? a.at - b.at : String(a.sessionId).localeCompare(String(b.sessionId)));
 }
 
 export function sessionSummaries(sets) {
@@ -70,20 +108,50 @@ export function sessionSummaries(sets) {
 export function suggest(sets, exercise) {
   const t = targetsFor(exercise);
   const rawUnit = exercise && exercise.unit;
-  const unit = rawUnit === 'stufe' ? 'stufe' : rawUnit === 'time' ? 'time' : 'kg';
+  const unit = ['stufe', 'time', 'body', 'cardio'].includes(rawUnit) ? rawUnit : 'kg';
 
   const list = Array.isArray(sets) ? sets : [];
   const wanted = exercise && typeof exercise === 'object' && exercise.id ? exercise.id : null;
   const filtered = wanted ? list.filter(s => s && s.exerciseId === wanted) : list;
-  const hist = sessionSummaries(filtered);
 
-  if (hist.length === 0) {
+  const firstTime = () => ({
+    kind: 'first-time', load: null, reps: null,
+    reason: 'No logged sets yet — do one session and the coach starts from there.',
+    lastLoad: null, lastReps: [], sessionsAtLoad: 0,
+  });
+
+  // --- bodyweight: no load exists, so reps are the whole record ---
+  if (unit === 'body') {
+    const bh = repSummaries(filtered);
+    if (bh.length === 0) return firstTime();
+    const bLast = bh[bh.length - 1];
+    const bReps = bLast.reps;
+    const bBase = { lastLoad: null, lastReps: bReps, sessionsAtLoad: bh.length };
+    if (bReps.length === 0) {
+      return {
+        kind: 'no-reps', load: null, reps: null,
+        reason: 'This was logged without rep counts, so there is nothing to progress from. Add reps next time.',
+        ...bBase,
+      };
+    }
+    const bWeakest = Math.min(...bReps);
+    if (bWeakest >= t.repMax) {
+      return {
+        kind: 'add-set', load: null, reps: t.repMax,
+        reason: `Every set reached ${t.repMax} reps. There is no weight to add here — add another set, or move to a harder variation.`,
+        ...bBase,
+      };
+    }
+    const bTarget = Math.min(t.repMax, bWeakest + 1);
     return {
-      kind: 'first-time', load: null, reps: null,
-      reason: 'No logged sets yet — do one session and the coach starts from there.',
-      lastLoad: null, lastReps: [], sessionsAtLoad: 0,
+      kind: 'add-reps', load: null, reps: bTarget,
+      reason: `Your weakest set was ${bWeakest} reps. Aim for ${bTarget} on every set.`,
+      ...bBase,
     };
   }
+
+  const hist = sessionSummaries(filtered);
+  if (hist.length === 0) return firstTime();
 
   const last = hist[hist.length - 1];
   const lastLoad = last.load;
@@ -98,17 +166,20 @@ export function suggest(sets, exercise) {
 
   const base = { lastLoad, lastReps, sessionsAtLoad };
 
-  if (unit === 'time') {
+  // --- durations: a held plank in seconds, or a cardio piece in minutes ---
+  if (unit === 'time' || unit === 'cardio') {
+    const noun = unit === 'cardio' ? 'minutes' : 'seconds';
+    const what = unit === 'cardio' ? 'effort' : 'hold';
     const best = hist.reduce((m, h) => Math.max(m, h.load), 0);
     if (lastLoad >= best - 0.001) {
       return {
         kind: 'add-load', load: roundToStep(lastLoad + t.increment, t.step), reps: null,
-        reason: `You matched your best hold — go ${t.increment} seconds longer.`, ...base,
+        reason: `You matched your best ${what} — go ${t.increment} ${noun} longer.`, ...base,
       };
     }
     return {
       kind: 'hold', load: best, reps: null,
-      reason: `Your best hold is ${best} seconds — match that again.`, ...base,
+      reason: `Your best ${what} is ${best} ${noun} — match that again.`, ...base,
     };
   }
 

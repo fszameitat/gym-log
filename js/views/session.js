@@ -7,25 +7,39 @@ import { unitOf } from '../units.js';
 import { suggest } from '../coach.js';
 import { coachBlock } from './coach-block.js';
 
-function block(session, eid, ex, rows, tip) {
+function block(session, eid, ex, rows, tip, ph) {
   const name = ex ? ex.name : 'Removed exercise';
   const u = unitOf(ex);
   const loadLabel = u.short;
 
+  // A box you have not filled in yet stays EMPTY, with last time's number as a grey ghost.
+  // It used to be pre-filled with 0, so every entry meant clearing a zero first.
+  const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? String(Number(v)) : '');
+  const wPh = num(ph && ph.weight) || '–';
+  const rPh = num(ph && ph.reps) || '–';
+
   const body = rows.map((r, i) => {
-    const load = `<td><input type="number" step="${u.step}" min="0" inputmode="decimal" value="${r.weight}" data-field="weight" data-id="${r.id}" data-focus="w-${r.id}" aria-label="${esc(u.label)}"></td><td class="unit">${esc(loadLabel)}</td>`;
+    // Bodyweight work has nothing to put in a load box, so it does not get one.
+    const load = u.hasLoad
+      ? `<td><input type="number" step="${u.step}" min="0" inputmode="decimal" value="${num(r.weight)}" placeholder="${esc(wPh)}" data-field="weight" data-id="${r.id}" data-focus="w-${r.id}" aria-label="${esc(u.label)}"></td><td class="unit">${esc(loadLabel)}</td>`
+      : `<td colspan="2" class="unit bw">bodyweight</td>`;
     const reps = u.hasReps
-      ? `<td><input type="number" step="1" min="0" inputmode="numeric" value="${r.reps == null ? '' : r.reps}" data-field="reps" data-id="${r.id}" data-focus="p-${r.id}" aria-label="Reps" placeholder="–"></td><td class="unit">reps</td>`
+      ? `<td><input type="number" step="1" min="0" inputmode="numeric" value="${num(r.reps)}" data-field="reps" data-id="${r.id}" data-focus="p-${r.id}" aria-label="Reps" placeholder="${esc(rPh)}"></td><td class="unit">reps</td>`
       : `<td colspan="2"></td>`;
     return `<tr class="${r.done ? 'done' : ''}"><td class="idx">${i + 1}</td>${load}${reps}`
       + `<td><button class="check${r.done ? ' on' : ''}" data-act="toggle-done" data-id="${r.id}" aria-label="Done">&#10003;</button></td>`
       + `<td><button class="del" data-act="remove-set" data-id="${r.id}" aria-label="Remove set">&times;</button></td></tr>`;
   }).join('');
 
-  const vol = totalVolume(rows);
-  const summary = u.id === 'time'
-    ? `${rows.filter(r => r.done).length} holds`
-    : fmtVolume(vol);
+  // Volume in kilograms is meaningless for a plank, a row or a set of push-ups, so each
+  // unit summarises itself in the terms it is actually measured in.
+  const done = rows.filter(r => r.done);
+  const sum = (f) => done.reduce((t, r) => t + (Number(f(r)) || 0), 0);
+  const summary =
+      u.id === 'time'   ? `${done.length} hold${done.length === 1 ? '' : 's'}`
+    : u.id === 'cardio' ? `${Math.round(sum(r => r.weight))} min`
+    : u.id === 'body'   ? `${Math.round(sum(r => r.reps))} reps`
+    : fmtVolume(totalVolume(rows));
 
   return `<section class="card ex"><div class="row"><h2 class="grow"><a href="#/exercise/${eid}">${esc(name)}</a></h2><span class="muted">${summary}</span></div>`
     + (tip || '')
@@ -58,7 +72,11 @@ export function view(state) {
     // feeding today's half-finished sets back in would have the coach chase its own tail.
     const history = state.sets.filter(x => x.exerciseId === eid && x.sessionId !== s.id);
     const tip = s.endedAt ? '' : coachBlock(suggest(history, ex), ex, { sessionId: s.id, exerciseId: eid });
-    html += block(s, eid, ex, sets.filter(x => x.exerciseId === eid), tip);
+    // What you actually lifted last time, shown as the placeholder so the numbers are on
+    // screen without being pre-typed into the row.
+    const done = history.filter(x => x.done === true && Number(x.weight) > 0);
+    const ph = done.length ? done[done.length - 1] : null;
+    html += block(s, eid, ex, sets.filter(x => x.exerciseId === eid), tip, ph);
   }
 
   html += `<section class="card"><div class="form"><select id="session-add-select">`

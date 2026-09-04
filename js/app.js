@@ -2,9 +2,11 @@
 import * as db from './db.js';
 import { createRestTimer } from './timer.js';
 import { clock } from './fmt.js';
-import { toKg, hasReps } from './units.js';
+import { toKg, hasLoad } from './units.js';
 import { buildRows, toCsv } from './csv.js';
+import { UNIT_IDS } from './units.js';
 import { SEED_EXERCISES } from './seed-history.js';
+import { CATALOG } from './catalog.js';
 import { view as homeView } from './views/home.js';
 import { view as routinesView } from './views/routines.js';
 import { view as exercisesView } from './views/exercises.js';
@@ -17,6 +19,8 @@ export const state = {
   route: { name: 'home', id: null },
   exercises: [], routines: [], sessions: [], sets: [],
   rest: { running: false, remaining: 0, total: 0 },
+  editingRoutine: null,   // which routine's exercise picker is open
+  catalogQuery: '', catalogGroup: '',
   ready: false,
 };
 
@@ -118,22 +122,53 @@ async function loadAll() {
   // it, so this derived value is never written back into the database.
   const exById = new Map(state.exercises.map((e) => [e.id, e]));
   for (const st of state.sets) {
+    const ex = exById.get(st.exerciseId);
     Object.defineProperty(st, 'kgWeight', {
-      value: toKg(st.weight, exById.get(st.exerciseId)),
+      value: toKg(st.weight, ex),
+      enumerable: false, configurable: true, writable: true,
+    });
+    // Bodyweight work has no weight to record, so the maths has to be told that a missing
+    // weight is expected rather than missing data.
+    Object.defineProperty(st, 'loadless', {
+      value: !hasLoad(ex),
       enumerable: false, configurable: true, writable: true,
     });
   }
   state.ready = true;
 }
 
-async function seedIfEmpty() {
-  const existing = await db.all('exercises');
-  if (existing.length) return;
-  await db.bulkPut('exercises', SEED_EXERCISES.map((e, i) => ({
+const SEEDED_KEY = 'gymlog.seeded';
+function markSeeded() { try { localStorage.setItem(SEEDED_KEY, '1'); } catch { /* private mode */ } }
+function hasSeeded() { try { return localStorage.getItem(SEEDED_KEY) === '1'; } catch { return false; } }
+
+function newExercise(e, i) {
+  return {
     id: db.uid(), name: e.name, muscleGroup: e.muscleGroup,
     defaultSets: e.defaultSets, unit: e.unit, kgPerStufe: 5,
+    restSeconds: e.restSeconds || DEFAULT_REST_SECONDS,
     notes: '', createdAt: Date.now() + i,
-  })));
+  };
+}
+
+/** The starter library is offered ONCE, on a genuinely new install.
+ *  It used to re-seed whenever the exercise store happened to be empty, so deleting your
+ *  exercises and reloading brought them all back, and "Reset everything" resurrected them too.
+ *  A flag makes a deletion stick; the library can be re-added deliberately from Exercises. */
+async function seedIfNeverSeeded() {
+  if (hasSeeded()) return;
+  const existing = await db.all('exercises');
+  if (existing.length) { markSeeded(); return; }   // an older install, already populated
+  await db.bulkPut('exercises', SEED_EXERCISES.map(newExercise));
+  markSeeded();
+}
+
+/** Adds only the starter exercises you do not already have, matched on name. */
+async function addStarterLibrary() {
+  const have = new Set((await db.all('exercises')).map((e) => String(e.name).toLowerCase()));
+  const missing = SEED_EXERCISES.filter((e) => !have.has(e.name.toLowerCase()));
+  if (missing.length) await db.bulkPut('exercises', missing.map(newExercise));
+  markSeeded();
+  return missing.length;
 }
 
 /* ---------- routing ---------- */
@@ -200,7 +235,7 @@ async function addExercise(name, muscleGroup, defaultSets, unit) {
   const ex = {
     id: db.uid(), name, muscleGroup: String(muscleGroup || '').trim() || 'Other',
     defaultSets: Math.max(1, Math.round(num(defaultSets, 3))),
-    unit: ['kg', 'stufe', 'time'].includes(unit) ? unit : 'kg',
+    unit: UNIT_IDS.includes(unit) ? unit : 'kg',
     kgPerStufe: 5, notes: '', createdAt: Date.now(),
   };
   await db.put('exercises', ex);
@@ -248,6 +283,48 @@ async function exportCsv() {
   return rows.length;
 }
 
+/** Adds a routine and any exercises it needs, WITHOUT touching anything already there.
+ *  Unlike a backup restore this merges: exercises are matched by name and reused, so
+ *  importing a plan twice does not duplicate your library or lose a single logged set. */
+async function importRoutine(file) {
+  const data = JSON.parse(await file.text());
+  if (!data || data.kind !== 'gym-log-routine') throw new Error('That is not a Gym Log routine file.');
+  if (!Array.isArray(data.exercises) || !data.exercises.length) throw new Error('That routine has no exercises.');
+
+  const existing = await db.all('exercises');
+  const byName = new Map(existing.map((e) => [String(e.name).toLowerCase(), e]));
+  const ids = [];
+  const created = [];
+
+  for (const spec of data.exercises) {
+    const key = String(spec.name || '').toLowerCase();
+    if (!key) continue;
+    let ex = byName.get(key);
+    if (!ex) {
+      ex = {
+        id: db.uid(), name: spec.name, muscleGroup: spec.group || 'Other',
+        defaultSets: Math.max(1, Math.round(num(spec.defaultSets, 3))),
+        unit: UNIT_IDS.includes(spec.unit) ? spec.unit : 'kg',
+        kgPerStufe: 5, restSeconds: Math.max(5, Math.round(num(spec.restSeconds, DEFAULT_REST_SECONDS))),
+        notes: '', createdAt: Date.now() + created.length,
+      };
+      if (Number(spec.repMin) > 0) ex.repMin = Math.round(Number(spec.repMin));
+      if (Number(spec.repMax) > 0) ex.repMax = Math.round(Number(spec.repMax));
+      created.push(ex);
+      byName.set(key, ex);
+    }
+    ids.push(ex.id);
+  }
+  if (created.length) await db.bulkPut('exercises', created);
+
+  await db.put('routines', {
+    id: db.uid(), name: String(data.name || 'Imported routine'),
+    exerciseIds: ids, order: (await db.all('routines')).length, createdAt: Date.now(),
+  });
+  markSeeded();
+  return { exercises: ids.length, added: created.length };
+}
+
 /** Replaces the database with a backup file. This is the ONLY way training data moves
  *  between devices or web addresses — a PWA's storage belongs to one origin and never
  *  follows you, and nothing personal is baked into the app itself. */
@@ -262,6 +339,7 @@ async function importBackup(file) {
   await db.bulkPut('routines', data.routines);
   await db.bulkPut('sessions', data.sessions);
   await db.bulkPut('sets', data.sets);
+  markSeeded();
   return data.sessions.length;
 }
 
@@ -280,11 +358,10 @@ async function startSession(routineId) {
     for (const eid of routine.exerciseIds) {
       const ex = exerciseById(eid);
       const count = ex ? Math.max(1, ex.defaultSets || 3) : 3;
-      const prev = lastSetFor(eid);
       for (let i = 0; i < count; i++) {
         newSets.push({
           id: db.uid(), sessionId: session.id, exerciseId: eid, setIndex: i,
-          weight: prev ? prev.weight : 0, reps: prev ? prev.reps : 0,
+          weight: null, reps: null,
           done: false, at: Date.now(), createdAt: Date.now() + i, notes: '',
         });
       }
@@ -295,17 +372,11 @@ async function startSession(routineId) {
   location.hash = `#/session/${session.id}`;
 }
 
-function lastSetFor(exerciseId) {
-  const done = state.sets.filter((s) => s.exerciseId === exerciseId && s.done);
-  return done.length ? done[done.length - 1] : null;
-}
-
 async function addSet(sessionId, exerciseId) {
   const existing = setsFor(sessionId).filter((s) => s.exerciseId === exerciseId);
-  const prev = existing[existing.length - 1] || lastSetFor(exerciseId);
   await db.put('sets', {
     id: db.uid(), sessionId, exerciseId, setIndex: existing.length,
-    weight: prev ? prev.weight : 0, reps: prev ? prev.reps : 0,
+    weight: null, reps: null,
     done: false, at: Date.now(), createdAt: Date.now(), notes: '',
   });
   await loadAll();
@@ -326,12 +397,11 @@ async function addExerciseToSession(sessionId, exerciseId) {
   await db.put('sessions', session);
   const ex = exerciseById(exerciseId);
   const count = ex ? Math.max(1, ex.defaultSets || 3) : 3;
-  const prev = lastSetFor(exerciseId);
   const newSets = [];
   for (let i = 0; i < count; i++) {
     newSets.push({
       id: db.uid(), sessionId, exerciseId, setIndex: i,
-      weight: prev ? prev.weight : 0, reps: prev ? prev.reps : 0,
+      weight: null, reps: null,
       done: false, at: Date.now(), createdAt: Date.now() + i, notes: '',
     });
   }
@@ -359,13 +429,37 @@ const ACTIONS = {
     const input = $('#routine-name');
     const name = String(input.value || '').trim();
     if (!name) return;
+    const id = db.uid();
     await db.put('routines', {
-      id: db.uid(), name, exerciseIds: [], order: state.routines.length, createdAt: Date.now(),
+      id, name, exerciseIds: [], order: state.routines.length, createdAt: Date.now(),
     });
     input.value = '';
+    state.editingRoutine = id;   // go straight into picking its exercises
     await loadAll(); render();
   },
+
+  'catalog-group'(el) { state.catalogGroup = el.dataset.group || ''; render(); },
+
+  async 'catalog-add'(el) {
+    const entry = CATALOG.find((c) => c.name === el.dataset.name);
+    if (!entry) return;
+    await db.put('exercises', {
+      id: db.uid(), name: entry.name, muscleGroup: entry.group,
+      defaultSets: 3, unit: entry.unit, kgPerStufe: 5,
+      restSeconds: DEFAULT_REST_SECONDS, notes: '', createdAt: Date.now(),
+    });
+    await loadAll(); render();
+  },
+
+  'pick-routine-file'() {
+    const input = $('#routine-file');
+    if (input) input.click();
+  },
+
+  'edit-routine'(el) { state.editingRoutine = el.dataset.id; render(); },
+  'done-routine'() { state.editingRoutine = null; render(); },
   async 'delete-routine'(el) {
+    if (state.editingRoutine === el.dataset.id) state.editingRoutine = null;
     await db.del('routines', el.dataset.id);
     await loadAll(); render();
   },
@@ -418,12 +512,13 @@ const ACTIONS = {
   async 'apply-suggestion'(el) {
     const sid = el.dataset.sid;
     const eid = el.dataset.eid;
-    const load = Math.max(0, num(el.dataset.load, 0));
+    const loadRaw = el.dataset.load;
+    const load = loadRaw === '' || loadRaw == null ? null : Math.max(0, num(loadRaw, 0));
     const repsRaw = el.dataset.reps;
     const reps = repsRaw === '' || repsRaw == null ? null : Math.max(0, Math.round(num(repsRaw, 0)));
     const targets = setsFor(sid).filter((x) => x.exerciseId === eid && !x.done);
     for (const t of targets) {
-      t.weight = load;
+      if (load !== null) t.weight = load;   // bodyweight work has no load to write
       if (reps !== null) t.reps = reps;
       await db.put('sets', t);
     }
@@ -450,12 +545,18 @@ const ACTIONS = {
   },
 
   async 'reset-all'() {
-    if (!confirmish('Delete every workout, routine and exercise?')) return;
+    if (!confirmish('Delete every workout, routine and exercise?\n\nThis leaves the app completely empty. Your backup file is the only way back.')) return;
     await db.clearAll();
-    await seedIfEmpty();
+    markSeeded();          // stay empty; do not resurrect the starter library
     await loadAll();
     location.hash = '#/';
     render();
+  },
+
+  async 'seed-library'() {
+    const n = await addStarterLibrary();
+    await loadAll(); render();
+    window.alert(n === 0 ? 'You already have all of the starter exercises.' : `Added ${n} starter exercises.`);
   },
 };
 
@@ -472,12 +573,24 @@ document.addEventListener('click', async (ev) => {
   try { await fn(el); } catch (err) { console.error('action failed', el.dataset.act, err); }
 });
 
+document.addEventListener('input', (ev) => {
+  const el = ev.target.closest('[data-field="catalog-search"]');
+  if (!el) return;
+  state.catalogQuery = el.value;
+  render();
+});
+
 document.addEventListener('change', async (ev) => {
   const el = ev.target.closest('[data-field]');
   if (!el) return;
   const field = el.dataset.field;
   if (field === 'weight' || field === 'reps') {
-    const v = field === 'reps' ? Math.max(0, Math.round(num(el.value))) : Math.max(0, num(el.value));
+    // An emptied box means "not entered", which is not the same as zero: null keeps the row
+    // out of the volume and rep maths instead of logging a genuine 0 kg set.
+    const raw = String(el.value).trim();
+    const v = raw === ''
+      ? null
+      : field === 'reps' ? Math.max(0, Math.round(num(raw))) : Math.max(0, num(raw));
     await updateSet(el.dataset.id, { [field]: v });
     await loadAll();
     render();
@@ -499,10 +612,21 @@ document.addEventListener('change', async (ev) => {
       window.alert(`Could not read that backup: ${err.message}`);
     }
     el.value = '';
+  } else if (field === 'routine-file') {
+    const file = el.files && el.files[0];
+    if (!file) return;
+    try {
+      const r = await importRoutine(file);
+      await loadAll(); render();
+      window.alert(`Routine imported — ${r.exercises} exercises, ${r.added} of them new.\n\nNothing already in your library was changed.`);
+    } catch (err) {
+      window.alert(`Could not read that routine: ${err.message}`);
+    }
+    el.value = '';
   } else if (field === 'exercise-unit') {
     const e = exerciseById(el.dataset.id);
     if (e) {
-      e.unit = ['kg', 'stufe', 'time'].includes(el.value) ? el.value : 'kg';
+      e.unit = UNIT_IDS.includes(el.value) ? el.value : 'kg';
       await db.put('exercises', e);
       await loadAll(); render();
     }
@@ -526,6 +650,36 @@ document.addEventListener('change', async (ev) => {
   }
 });
 
+// Tapping a box that already holds a number should let you type over it. Without this the
+// caret lands after the existing value and you get 6062.5 instead of 62.5.
+//
+// Selecting on focus alone is not enough: the click that GAVE focus then places its own
+// caret and collapses the selection again. So the element is marked on focus and the
+// following mouseup is suppressed, which is what actually keeps the text selected.
+let selectOnRelease = null;
+const isNumberBox = (el) => el && el.tagName === 'INPUT' && el.type === 'number' && el.value !== '';
+
+document.addEventListener('focusin', (ev) => {
+  const el = ev.target;
+  if (!isNumberBox(el)) return;
+  selectOnRelease = el;
+  try { el.select(); } catch { /* some mobile browsers refuse */ }
+});
+
+document.addEventListener('mouseup', (ev) => {
+  if (!selectOnRelease || ev.target !== selectOnRelease) { selectOnRelease = null; return; }
+  ev.preventDefault();
+  try { selectOnRelease.select(); } catch { /* ignore */ }
+  selectOnRelease = null;
+});
+
+// Touch keyboards never fire mouseup before the caret lands, so re-select on the tap end too.
+document.addEventListener('touchend', (ev) => {
+  const el = ev.target;
+  if (!isNumberBox(el)) return;
+  setTimeout(() => { try { el.select(); } catch { /* ignore */ } }, 0);
+}, { passive: true });
+
 document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Enter') return;
   const el = ev.target.closest('[data-enter]');
@@ -539,7 +693,7 @@ document.getElementById('back').addEventListener('click', () => history.back());
 
 /* ---------- boot ---------- */
 (async function boot() {
-  await seedIfEmpty();
+  await seedIfNeverSeeded();
   await loadAll();
   state.route = parseHash();
   render();

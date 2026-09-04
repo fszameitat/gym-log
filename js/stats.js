@@ -10,9 +10,15 @@ export function epley1RM(weight, reps) {
   return Math.round(weight * (1 + reps / 30) * 100) / 100;
 }
 
-// `kgWeight` is attached at load time by app.js: it is the set's load converted to
-// kilograms via the exercise's unit (Stufe -> kg, timed holds -> 0). When it is absent
-// the raw weight is already in kg.
+// `kgWeight` and `loadless` are attached at load time by app.js. `kgWeight` is the set's
+// load converted to kilograms via the exercise's unit (Stufe -> kg, timed holds -> 0).
+// `loadless` marks a bodyweight exercise, where there is no weight to record and the rep
+// count alone is the result — without it, fifteen push-ups counted as nothing at all.
+export function counts(set) {
+  if (!set || typeof set !== 'object' || set.done !== true) return false;
+  if (!ok(set.reps)) return false;
+  return set.loadless === true ? true : ok(set.weight);
+}
 export function setVolume(set) {
   if (typeof set !== 'object' || set === null) return 0;
   const w = Number.isFinite(set.kgWeight) ? set.kgWeight : set.weight;
@@ -33,14 +39,18 @@ export function personalRecords(sets) {
   let bestSet = null;
 
   for (const set of sets) {
-    if (set && set.done === true && ok(set.weight) && ok(set.reps)) {
-      if (set.weight > maxWeight) maxWeight = set.weight;
-      if (set.reps > maxReps) maxReps = set.reps;
-      const current1RM = epley1RM(set.weight, set.reps);
-      if (current1RM > best1RM) {
-        best1RM = current1RM;
-        bestSet = set;
-      }
+    if (!counts(set)) continue;
+    if (set.loadless === true) {
+      // no weight exists, so the best set is simply the longest run of reps
+      if (set.reps > maxReps) { maxReps = set.reps; bestSet = set; }
+      continue;
+    }
+    if (set.weight > maxWeight) maxWeight = set.weight;
+    if (set.reps > maxReps) maxReps = set.reps;
+    const current1RM = epley1RM(set.weight, set.reps);
+    if (current1RM > best1RM) {
+      best1RM = current1RM;
+      bestSet = set;
     }
   }
 
@@ -57,15 +67,15 @@ export function exerciseSummary(sets) {
   const sessionIds = new Set();
 
   for (const set of sets) {
-    if (set && set.done === true && ok(set.weight) && ok(set.reps)) {
-      totalSets++;
-      totalReps += set.reps;
-      volume += setVolume(set);
-      if (set.weight > maxWeight) maxWeight = set.weight;
-      const current1RM = epley1RM(set.weight, set.reps);
-      if (current1RM > best1RM) best1RM = current1RM;
-      sessionIds.add(set.sessionId);
-    }
+    if (!counts(set)) continue;
+    totalSets++;
+    totalReps += set.reps;
+    volume += setVolume(set);
+    sessionIds.add(set.sessionId);
+    if (set.loadless === true) continue;
+    if (set.weight > maxWeight) maxWeight = set.weight;
+    const current1RM = epley1RM(set.weight, set.reps);
+    if (current1RM > best1RM) best1RM = current1RM;
   }
 
   return {
