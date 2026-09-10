@@ -164,6 +164,14 @@ table.sets td.prev > * { margin-right: 6px; }
    silently corrected or deleted — it is your log, and only you know what really happened. */
 table.sets tr.outlier td input[data-field="weight"] { border-color: var(--danger); }
 
+/* Reorder arrows in a routine. Deliberately a proper tap target (38px) rather than the
+   smallest thing that fits — they sit next to a delete button. */
+button.ghost.move {
+  width: 38px; min-height: 38px; padding: 0; flex: none;
+  font-size: 15px; line-height: 1; color: var(--text);
+}
+button.ghost.move[disabled] { opacity: 0.3; }
+
 /* The coach's per-set targets, when the load changed from set to set last time. */
 ol.coach-sets { list-style: none; margin: 8px 0 0; padding: 0; }
 ol.coach-sets li {

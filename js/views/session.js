@@ -50,7 +50,7 @@ function block(state, session, eid, ex, rows, tip, prev, range) {
     const bad = u.hasLoad && isOutlier(r.weight, range);
     const main = `<tr class="${r.done ? 'done' : ''}${bad ? ' outlier' : ''}"><td class="idx">${i + 1}</td>${load}${reps}`
       + `<td><button class="check${r.done ? ' on' : ''}" data-act="toggle-done" data-id="${r.id}" aria-label="Done">&#10003;</button></td>`
-      + `<td><button class="del" data-act="remove-set" data-id="${r.id}" aria-label="Remove set">&times;</button></td></tr>`;
+      + `<td><button class="del" data-act="remove-set" data-id="${r.id}" data-idx="${i}" aria-label="Remove set">&times;</button></td></tr>`;
 
     // What this same set did last time, and how far today is from it.
     let line = '';

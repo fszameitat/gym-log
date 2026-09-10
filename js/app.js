@@ -1,7 +1,7 @@
 // app.js — bootstrap, state, routing and event wiring. Written by Claude.
 import * as db from './db.js';
 import { createRestTimer } from './timer.js';
-import { clock } from './fmt.js';
+import { clock, fmtDate } from './fmt.js';
 import { toKg, hasLoad } from './units.js';
 import { buildRows, toCsv } from './csv.js';
 import { UNIT_IDS } from './units.js';
@@ -15,12 +15,13 @@ import { view as sessionView } from './views/session.js';
 import { view as progressView } from './views/progress.js';
 import { metricsFor } from './views/exercise-progress.js';
 import { decodePerSet } from './views/coach-block.js';
+import { moveItem, deleteWarning } from './edits.js';
 
 
 // Which exercise / span / metric the Progress tab is showing. Remembered per device so the
 // tab opens where you left it; a failed read must never stop the app booting.
 function loadUi() {
-  const fallback = { progressExerciseId: null, progressBucket: 'session', progressMetric: 'maxLoad' };
+  const fallback = { progressExerciseId: null, progressBucket: 'session', progressMetric: 'maxLoad', progressSpan: '25' };
   // unlockedId is deliberately NOT restored: every screen opens fully locked.
   try {
     const raw = localStorage.getItem('gymlog.ui');
@@ -444,7 +445,11 @@ const ACTIONS = {
     render();
   },
   async 'delete-exercise'(el) {
-    await db.del('exercises', el.dataset.id);
+    const id = el.dataset.id;
+    const ex = state.exercises.find((e) => e.id === id);
+    const logged = state.sets.filter((s) => s.exerciseId === id && s.done === true).length;
+    if (!confirmish(deleteWarning('exercise', { name: ex ? ex.name : '', sets: logged }))) return;
+    await db.del('exercises', id);
     await loadAll(); render();
   },
 
@@ -482,8 +487,24 @@ const ACTIONS = {
   'edit-routine'(el) { state.editingRoutine = el.dataset.id; render(); },
   'done-routine'() { state.editingRoutine = null; render(); },
   async 'delete-routine'(el) {
-    if (state.editingRoutine === el.dataset.id) state.editingRoutine = null;
-    await db.del('routines', el.dataset.id);
+    const id = el.dataset.id;
+    const r = routineById(id);
+    const n = r && Array.isArray(r.exerciseIds) ? r.exerciseIds.length : 0;
+    if (!confirmish(deleteWarning('routine', { name: r ? r.name : '', exercises: n }))) return;
+    if (state.editingRoutine === id) state.editingRoutine = null;
+    await db.del('routines', id);
+    await loadAll(); render();
+  },
+
+  /** Moves one exercise up or down inside a routine. The order is the order you do them in,
+   *  and a workout started from the routine inherits it. */
+  async 'routine-move'(el) {
+    const r = routineById(el.dataset.id);
+    if (!r || !Array.isArray(r.exerciseIds)) return;
+    const next = moveItem(r.exerciseIds, num(el.dataset.i, -1), num(el.dataset.d, 0));
+    if (next.join(' ') === r.exerciseIds.join(' ')) return;   // already at the end
+    r.exerciseIds = next;
+    await db.put('routines', r);
     await loadAll(); render();
   },
   async 'routine-toggle-exercise'(el) {
@@ -499,6 +520,12 @@ const ACTIONS = {
 
   async 'add-set'(el) { await addSet(el.dataset.sid, el.dataset.eid); render(); },
   async 'remove-set'(el) {
+    const s = state.sets.find((x) => x.id === el.dataset.id);
+    // An untouched row is deleted without a word; one that holds numbers is worth a question.
+    const warn = deleteWarning('set', {
+      index: el.dataset.idx, weight: s && s.weight, reps: s && s.reps, done: s && s.done,
+    });
+    if (warn !== null && !confirmish(warn)) return;
     await db.del('sets', el.dataset.id);
     await loadAll(); render();
   },
@@ -525,7 +552,14 @@ const ACTIONS = {
   },
   async 'delete-session'(el) {
     const id = el.dataset.id;
-    await db.delMany('sets', setsFor(id).map((s) => s.id));
+    const s = state.sessions.find((x) => x.id === id);
+    const logged = setsFor(id).filter((x) => x.done === true).length;
+    if (!confirmish(deleteWarning('session', {
+      name: s ? s.routineName : '',
+      date: s ? fmtDate(s.startedAt) : '',
+      sets: logged,
+    }))) return;
+    await db.delMany('sets', setsFor(id).map((s2) => s2.id));
     await db.del('sessions', id);
     await loadAll(); render();
   },
@@ -577,6 +611,7 @@ const ACTIONS = {
 
   'set-bucket'(el) { state.ui.progressBucket = el.dataset.val; saveUi(); render(); },
   'set-metric'(el) { state.ui.progressMetric = el.dataset.val; saveUi(); render(); },
+  'set-span'(el) { state.ui.progressSpan = el.dataset.val; saveUi(); render(); },
 
   'rest-stop'() { restTimer.stop(); render(); },
   'rest-add'(el) { restTimer.addSeconds(num(el.dataset.secs, 30)); },

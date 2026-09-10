@@ -45,12 +45,20 @@ export function view(state) {
       if (picked.length === 0) {
         html += `<p class="muted">No exercises yet.</p>`;
       } else {
+        // The list order IS the order you do them in — a workout started from this routine
+        // adds its exercises in exactly this sequence — so it has to be rearrangeable.
+        // Arrows rather than dragging: a drag gesture on a phone fights with scrolling, which
+        // is the very problem the locked input fields were added to solve.
         html += `<ul class="list">`;
-        for (const eid of picked) {
+        picked.forEach((eid, i) => {
           const ex = byId.get(eid);
           html += `<li><span class="li-t grow">${esc(ex ? ex.name : 'Removed exercise')}</span>`
-            + `<span class="li-s">${esc(ex ? unitOf(ex).label : '')}</span></li>`;
-        }
+            + `<span class="li-s">${esc(ex ? unitOf(ex).label : '')}</span>`
+            + `<button class="ghost move" data-act="routine-move" data-id="${r.id}" data-i="${i}" data-d="-1"`
+            + `${i === 0 ? ' disabled' : ''} aria-label="Move up">&uarr;</button>`
+            + `<button class="ghost move" data-act="routine-move" data-id="${r.id}" data-i="${i}" data-d="1"`
+            + `${i === picked.length - 1 ? ' disabled' : ''} aria-label="Move down">&darr;</button></li>`;
+        });
         html += `</ul>`;
       }
       html += `<div class="form"><button class="ghost" data-act="edit-routine" data-id="${r.id}">Edit exercises</button></div>`;

@@ -17,6 +17,23 @@ export const BUCKETS = [
   { id: 'month', label: 'Month' },
 ];
 
+/** How far back the chart reaches. 25 by default: enough that a couple of months of training
+ *  is on screen at once, few enough that the bars stay wide enough to aim a thumb at. */
+export const SPANS = [
+  { id: '10', label: 'Last 10' },
+  { id: '25', label: 'Last 25' },
+  { id: 'all', label: 'All' },
+];
+
+/** The tail of a series that the chosen span asks for. */
+export function windowFor(series, span) {
+  if (!Array.isArray(series)) return [];
+  if (span === 'all') return series.slice();
+  const n = Number(span);
+  if (!Number.isFinite(n) || n <= 0) return series.slice();
+  return series.slice(-Math.floor(n));
+}
+
 export function metricsFor(exercise) {
   const u = unitOf(exercise);
   switch (u.id) {
@@ -96,6 +113,7 @@ function deltaChip(entry, metric) {
 export function exerciseProgress(state, exercise, opts = {}) {
   const ui = state.ui || {};
   const bucket = BUCKETS.some((b) => b.id === ui.progressBucket) ? ui.progressBucket : 'session';
+  const span = SPANS.some((s) => s.id === ui.progressSpan) ? ui.progressSpan : '25';
 
   let html = `<section class="card"><h2>Exercise progress</h2>`;
 
@@ -119,6 +137,9 @@ export function exerciseProgress(state, exercise, opts = {}) {
     + `</div>`
     + `<div class="chips seg" role="group" aria-label="Metric">`
     + metrics.map((m) => `<button class="chip${m.id === metric ? ' on' : ''}" data-act="set-metric" data-val="${m.id}">${m.label}</button>`).join('')
+    + `</div>`
+    + `<div class="chips seg" role="group" aria-label="How much history">`
+    + SPANS.map((s) => `<button class="chip${s.id === span ? ' on' : ''}" data-act="set-span" data-val="${s.id}">${s.label}</button>`).join('')
     + `</div>`;
 
   const sets = state.sets.filter((s) => s.exerciseId === exercise.id);
@@ -140,7 +161,8 @@ export function exerciseProgress(state, exercise, opts = {}) {
     + `<div class="tile"><b>${overall === null ? '—' : (overall > 0 ? '+' : '') + overall.toLocaleString(undefined, { maximumFractionDigits: 1 }) + '%'}</b><span>since start</span></div>`
     + `</section>`;
 
-  const points = series.slice(-14).map((p) => ({ key: p.label, value: p.value }));
+  const shown = windowFor(series, span);
+  const points = shown.map((p) => ({ key: p.label, value: p.value }));
   const cumulative = metric === 'volume' || metric === 'reps' || metric === 'sets' || metric === 'nativeSum';
   const chartOpts = {
     width: 340, height: 190,
@@ -151,8 +173,9 @@ export function exerciseProgress(state, exercise, opts = {}) {
     ? barChart(points, { ...chartOpts, color: '#38bdf8' })
     : lineChart(points, chartOpts)}</div>`;
 
+  // The list mirrors the chart, newest first, so the chips move both together.
   html += `<ul class="list compact">`;
-  for (const entry of series.slice(-10).reverse()) {
+  for (const entry of shown.slice().reverse()) {
     html += `<li><span class="li-t">${esc(entry.label)}</span>`
       + `<span class="li-s">${formatMetric(entry.value, metric, exercise)} ${deltaChip(entry, metric)}</span></li>`;
   }
