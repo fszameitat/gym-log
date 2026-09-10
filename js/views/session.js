@@ -3,12 +3,24 @@
 // or a timed hold with no rep column at all.
 import { esc, fmtDateTime, fmtVolume, clock } from '../fmt.js';
 import { totalVolume } from '../stats.js';
-import { unitOf } from '../units.js';
+import { unitOf, formatLoad } from '../units.js';
 import { suggest } from '../coach.js';
 import { coachBlock } from './coach-block.js';
+import { previousRows, loadRange, isOutlier } from '../history.js';
 import { lockAttr, disabledAttr, lockButton } from '../lock.js';
 
-function block(state, session, eid, ex, rows, tip, ph) {
+/** "+2.5 kg", "−1 reps", "±0 reps" — only once there is something to compare. */
+function chip(now, then, label) {
+  const a = Number(now);
+  const b = Number(then);
+  if (!Number.isFinite(a) || a <= 0 || !Number.isFinite(b) || b <= 0) return '';
+  const d = Math.round((a - b) * 100) / 100;
+  const cls = d > 0 ? 'up' : d < 0 ? 'down' : 'same';
+  const sign = d > 0 ? '+' : d < 0 ? '−' : '±';
+  return `<span class="dlt ${cls}">${sign}${Math.abs(d)} ${esc(label)}</span>`;
+}
+
+function block(state, session, eid, ex, rows, tip, prev, range) {
   const lid = `ex-${eid}`;
   const off = disabledAttr(state, lid);
   const name = ex ? ex.name : 'Removed exercise';
@@ -18,10 +30,15 @@ function block(state, session, eid, ex, rows, tip, ph) {
   // A box you have not filled in yet stays EMPTY, with last time's number as a grey ghost.
   // It used to be pre-filled with 0, so every entry meant clearing a zero first.
   const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? String(Number(v)) : '');
-  const wPh = num(ph && ph.weight) || '–';
-  const rPh = num(ph && ph.reps) || '–';
 
   const body = rows.map((r, i) => {
+    // The ghost, the comparison line and the coach all line up on the SAME set number: row 3
+    // today is measured against row 3 of the last session, never against that session's
+    // heaviest set. That is the whole point when the load changes from set to set.
+    const p = prev[i] || null;
+    const wPh = num(p && p.weight) || '–';
+    const rPh = num(p && p.reps) || '–';
+
     // Bodyweight work has nothing to put in a load box, so it does not get one.
     const load = u.hasLoad
       ? `<td><input type="number" step="${u.step}" min="0" inputmode="decimal" value="${num(r.weight)}" placeholder="${esc(wPh)}" data-field="weight" data-id="${r.id}" data-focus="w-${r.id}"${off} aria-label="${esc(u.label)}"></td><td class="unit">${esc(loadLabel)}</td>`
@@ -29,9 +46,28 @@ function block(state, session, eid, ex, rows, tip, ph) {
     const reps = u.hasReps
       ? `<td><input type="number" step="1" min="0" inputmode="numeric" value="${num(r.reps)}" data-field="reps" data-id="${r.id}" data-focus="p-${r.id}"${off} aria-label="Reps" placeholder="${esc(rPh)}"></td><td class="unit">reps</td>`
       : `<td colspan="2"></td>`;
-    return `<tr class="${r.done ? 'done' : ''}"><td class="idx">${i + 1}</td>${load}${reps}`
+
+    const bad = u.hasLoad && isOutlier(r.weight, range);
+    const main = `<tr class="${r.done ? 'done' : ''}${bad ? ' outlier' : ''}"><td class="idx">${i + 1}</td>${load}${reps}`
       + `<td><button class="check${r.done ? ' on' : ''}" data-act="toggle-done" data-id="${r.id}" aria-label="Done">&#10003;</button></td>`
       + `<td><button class="del" data-act="remove-set" data-id="${r.id}" aria-label="Remove set">&times;</button></td></tr>`;
+
+    // What this same set did last time, and how far today is from it.
+    let line = '';
+    if (p) {
+      const was = [];
+      if (u.hasLoad && num(p.weight)) was.push(formatLoad(p.weight, ex));
+      if (u.hasReps && num(p.reps)) was.push(`${Number(p.reps)} reps`);
+      if (was.length) {
+        line += `<span class="prev-was">last: ${esc(was.join(' × '))}</span>`;
+        if (u.hasLoad) line += chip(r.weight, p.weight, loadLabel);
+        if (u.hasReps) line += chip(r.reps, p.reps, 'reps');
+      }
+    }
+    if (bad) line += `<span class="dlt bad">check this number</span>`;
+    const extra = line ? `<tr class="prevrow"><td></td><td colspan="6" class="prev">${line}</td></tr>` : '';
+
+    return main + extra;
   }).join('');
 
   // Volume in kilograms is meaningless for a plank, a row or a set of push-ups, so each
@@ -79,11 +115,14 @@ export function view(state) {
     // feeding today's half-finished sets back in would have the coach chase its own tail.
     const history = state.sets.filter(x => x.exerciseId === eid && x.sessionId !== s.id);
     const tip = s.endedAt ? '' : coachBlock(suggest(history, ex), ex, { sessionId: s.id, exerciseId: eid });
-    // What you actually lifted last time, shown as the placeholder so the numbers are on
-    // screen without being pre-typed into the row.
-    const done = history.filter(x => x.done === true && Number(x.weight) > 0);
-    const ph = done.length ? done[done.length - 1] : null;
-    html += block(state, s, eid, ex, sets.filter(x => x.exerciseId === eid), tip, ph);
+    // Last time's sets, in the order they were numbered. This used to be a single row picked
+    // as `history[history.length - 1]`, which is whatever IndexedDB happened to return last —
+    // set ids are random, so the "last set" shown was effectively a random one.
+    const prev = previousRows(state.sets, eid, s.id);
+    // The plausible band for this exercise, worked out from history only, so a number typed
+    // today cannot widen the band that is meant to catch it.
+    const range = loadRange(state.sets, eid, s.id);
+    html += block(state, s, eid, ex, sets.filter(x => x.exerciseId === eid), tip, prev, range);
   }
 
   html += `<section class="card"><div class="form"><select id="session-add-select">`

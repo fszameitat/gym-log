@@ -5,7 +5,9 @@
 // spread `undefined` instead of falling back to kg, an all-invalid `at` returned
 // Infinity, and the deload threshold was one session too eager).
 //
-// Pure functions only: no DOM, no IndexedDB, no imports.
+// Pure functions only: no DOM and no IndexedDB. The one import is history.js, which is
+// pure as well and owns the definition of "the previous session, sets in order".
+import { sessionsFor, loadRange, isOutlier } from './history.js';
 
 const DEFAULTS = {
   kg:     { repMin: 8,  repMax: 12, increment: 2.5, step: 0.5 },
@@ -105,19 +107,99 @@ export function sessionSummaries(sets) {
     a.at !== b.at ? a.at - b.at : String(a.sessionId).localeCompare(String(b.sessionId)));
 }
 
-export function suggest(sets, exercise) {
+/** One target per set position, taken from what you did in that same position last time.
+ *  This is the branch that matters when the load changes from set to set: measuring a
+ *  pyramid against its own heaviest set throws away four fifths of the session, and one
+ *  mistyped number then becomes the only thing the coach can see.
+ *
+ *  `sessions` is oldest-first, from history.sessionsFor. */
+function perSetTargets(sessions, t, unit) {
+  if (!sessions.length) return [];
+  const last = sessions[sessions.length - 1].rows;
+  const out = [];
+
+  for (let i = 0; i < last.length; i++) {
+    const load = Number(last[i].weight);
+    const reps = Number(last[i].reps);
+    const hasLoad = Number.isFinite(load) && load > 0;
+    const hasReps = Number.isFinite(reps) && reps > 0;
+    if (!hasLoad && unit !== 'body') continue;
+
+    const lastLoad = hasLoad ? load : null;
+    const mk = (kind, l, r, reason) =>
+      ({ index: i, kind, load: l, reps: r, lastLoad, lastReps: hasReps ? reps : null, reason });
+
+    if (!hasReps) {
+      out.push(mk('no-reps', lastLoad, null, 'logged without reps'));
+      continue;
+    }
+
+    // How many sessions in a row put the same load in this very position, and did the reps
+    // there move at all? Position by position, so a stuck top set is spotted even while the
+    // warm-up sets underneath it climb.
+    let run = 0;
+    for (let k = sessions.length - 1; k >= 0; k--) {
+      const row = sessions[k].rows[i];
+      if (!row) break;
+      const l = Number(row.weight);
+      if (!Number.isFinite(l) || (hasLoad && Math.abs(l - load) > 0.001)) break;
+      run++;
+    }
+    if (unit !== 'body' && run >= STALL_SESSIONS) {
+      const first = Number(sessions[sessions.length - run].rows[i].reps);
+      if (!(Number.isFinite(first) && reps > first)) {
+        const deloaded = unit === 'stufe'
+          ? Math.max(1, load - t.increment)
+          : Math.max(t.step, roundToStep(load * 0.9, t.step));
+        out.push(mk('deload', deloaded, t.repMin, `stuck ${run} sessions`));
+        continue;
+      }
+    }
+
+    if (reps >= t.repMax) {
+      const up = unit === 'body' ? null : roundToStep(load + t.increment, t.step);
+      out.push(mk('add-load', unit === 'body' ? null : up, unit === 'body' ? t.repMax : t.repMin,
+        unit === 'body' ? 'top of the range' : 'hit the top'));
+      continue;
+    }
+    out.push(mk('add-reps', lastLoad, Math.min(t.repMax, reps + 1), '+1 rep'));
+  }
+  return out;
+}
+
+/** True when the last session did NOT run straight sets — the case the old single-figure
+ *  advice was never right for. */
+function loadsVary(sessions) {
+  if (!sessions.length) return false;
+  const loads = sessions[sessions.length - 1].rows
+    .map(r => Number(r.weight))
+    .filter(v => Number.isFinite(v) && v > 0);
+  if (loads.length < 2) return false;
+  return Math.max(...loads) - Math.min(...loads) > 0.001;
+}
+
+/** The straight-sets advice: one figure for the whole exercise, read off the heaviest set.
+ *  Still exactly right when every set carries the same load — which is most exercises for
+ *  most people — so it is left alone and wrapped rather than replaced. */
+function coreSuggest(sets, exercise) {
   const t = targetsFor(exercise);
   const rawUnit = exercise && exercise.unit;
   const unit = ['stufe', 'time', 'body', 'cardio'].includes(rawUnit) ? rawUnit : 'kg';
 
   const list = Array.isArray(sets) ? sets : [];
   const wanted = exercise && typeof exercise === 'object' && exercise.id ? exercise.id : null;
-  const filtered = wanted ? list.filter(s => s && s.exerciseId === wanted) : list;
+  const byExercise = wanted ? list.filter(s => s && s.exerciseId === wanted) : list;
+
+  // A number that is nowhere near anything you have ever lifted is a typo, not a personal
+  // best. Left in, it becomes the heaviest set, and every suggestion from then on is built
+  // on it — which is exactly how the coach came to ask for 479.5 kg on the Pulldown.
+  const range = loadRange(byExercise, wanted, null);
+  const filtered = range ? byExercise.filter(s => !isOutlier(s && s.weight, range)) : byExercise;
 
   const firstTime = () => ({
     kind: 'first-time', load: null, reps: null,
     reason: 'No logged sets yet — do one session and the coach starts from there.',
-    lastLoad: null, lastReps: [], sessionsAtLoad: 0,
+    lastLoad: null, lastReps: [], sessionsAtLoad: 0, perSet: [], varied: false,
   });
 
   // --- bodyweight: no load exists, so reps are the whole record ---
@@ -221,5 +303,42 @@ export function suggest(sets, exercise) {
     kind: 'add-reps', load: lastLoad, reps: target,
     reason: `Your weakest set was ${weakest} reps. Same load, aim for ${target} on every set.`,
     ...base,
+  };
+}
+
+/**
+ * What to aim for next. Always carries `perSet` — one target per set position, so the
+ * screen can put a figure under every row — and `varied`, which says whether the last
+ * session actually used different loads. When it did, `kind` becomes 'per-set' and the
+ * single headline figure is dropped, because there isn't an honest one to give.
+ */
+export function suggest(sets, exercise) {
+  const out = coreSuggest(sets, exercise);
+
+  const rawUnit = exercise && exercise.unit;
+  const unit = ['stufe', 'time', 'body', 'cardio'].includes(rawUnit) ? rawUnit : 'kg';
+  // A duration is one effort per set with nothing to pyramid, so per-set targets would just
+  // repeat the headline. Leave those exercises exactly as they were.
+  if (unit === 'time' || unit === 'cardio') return { ...out, perSet: [], varied: false };
+
+  const t = targetsFor(exercise);
+  const list = Array.isArray(sets) ? sets : [];
+  const wanted = exercise && typeof exercise === 'object' && exercise.id ? exercise.id : null;
+  const byExercise = wanted ? list.filter(s => s && s.exerciseId === wanted) : list;
+  const range = loadRange(byExercise, wanted, null);
+  const clean = range ? byExercise.filter(s => !isOutlier(s && s.weight, range)) : byExercise;
+
+  const sessions = sessionsFor(clean, wanted);
+  const perSet = perSetTargets(sessions, t, unit);
+  const varied = unit !== 'body' && loadsVary(sessions);
+
+  if (!varied || perSet.length < 2 || out.kind === 'first-time' || out.kind === 'no-reps') {
+    return { ...out, perSet, varied };
+  }
+  return {
+    ...out, perSet, varied,
+    kind: 'per-set', load: null, reps: null,
+    reason: 'The load changed from set to set last time, so each set gets its own target — '
+      + 'measured against the same set number, not against your heaviest.',
   };
 }

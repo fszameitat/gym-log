@@ -14,6 +14,7 @@ import { view as exerciseView } from './views/exercise.js';
 import { view as sessionView } from './views/session.js';
 import { view as progressView } from './views/progress.js';
 import { metricsFor } from './views/exercise-progress.js';
+import { decodePerSet } from './views/coach-block.js';
 
 
 // Which exercise / span / metric the Progress tab is showing. Remembered per device so the
@@ -534,6 +535,26 @@ const ACTIONS = {
   async 'apply-suggestion'(el) {
     const sid = el.dataset.sid;
     const eid = el.dataset.eid;
+
+    // A pyramid gets one target per set position rather than one figure for the exercise.
+    // Positions are counted over ALL of today's rows, finished ones included, so set 3 keeps
+    // getting set 3's target even after sets 1 and 2 are ticked off. More rows today than
+    // last time simply repeat the last target instead of running out.
+    const perSet = decodePerSet(el.dataset.perset || '');
+    if (perSet.length) {
+      const rows = setsFor(sid).filter((x) => x.exerciseId === eid);
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].done) continue;
+        const p = perSet[Math.min(i, perSet.length - 1)];
+        if (!p) continue;
+        if (p.load !== null) rows[i].weight = p.load;
+        if (p.reps !== null) rows[i].reps = p.reps;
+        await db.put('sets', rows[i]);
+      }
+      await loadAll(); render();
+      return;
+    }
+
     const loadRaw = el.dataset.load;
     const load = loadRaw === '' || loadRaw == null ? null : Math.max(0, num(loadRaw, 0));
     const repsRaw = el.dataset.reps;
