@@ -3,6 +3,7 @@
 import { esc } from '../fmt.js';
 import { UNITS, unitOf, kgPerStufe } from '../units.js';
 import { CATALOG, CATALOG_GROUPS } from '../catalog.js';
+import { lockAttr, disabledAttr, lockButton } from '../lock.js';
 
 export function view(state) {
   let html = `<section class="card"><h2>Add exercise</h2><div class="form">`
@@ -39,13 +40,15 @@ export function view(state) {
       const u = unitOf(ex);
       // The name gets its own line. Squeezed onto one row with the sets and rest boxes it
       // was truncated to "Klimmzu" and "Rückenst", which is the one thing you need to read.
-      html += `<li class="ex-row"><a class="li-t" href="#/exercise/${ex.id}">${esc(ex.name)}`
+      const lid = `row-${ex.id}`;
+      html += `<li${lockAttr(state, lid, 'ex-row')}><a class="li-t" href="#/exercise/${ex.id}">${esc(ex.name)}`
         + (u.id === 'kg' ? '' : ` <span class="badge">${esc(u.short || u.label)}</span>`)
         + `</a>`
         + `<div class="ex-controls">`
-        + `<label class="mini">sets<input type="number" min="1" max="20" value="${ex.defaultSets}" data-field="default-sets" data-id="${ex.id}" data-focus="ds-${ex.id}" inputmode="numeric"></label>`
-        + `<label class="mini">rest<input type="number" min="5" max="600" step="15" value="${Number(ex.restSeconds) > 0 ? Math.round(ex.restSeconds) : 120}" data-field="rest-seconds" data-id="${ex.id}" data-focus="rs-${ex.id}" inputmode="numeric">s</label>`
+        + `<label class="mini">sets<input type="number" min="1" max="20" value="${ex.defaultSets}" data-field="default-sets" data-id="${ex.id}" data-focus="ds-${ex.id}" inputmode="numeric"${disabledAttr(state, lid)}></label>`
+        + `<label class="mini">rest<input type="number" min="5" max="600" step="15" value="${Number(ex.restSeconds) > 0 ? Math.round(ex.restSeconds) : 120}" data-field="rest-seconds" data-id="${ex.id}" data-focus="rs-${ex.id}" inputmode="numeric"${disabledAttr(state, lid)}>s</label>`
         + `<span class="grow"></span>`
+        + lockButton(state, lid)
         + `<button class="del" data-act="delete-exercise" data-id="${ex.id}" aria-label="Delete">&times;</button>`
         + `</div></li>`;
     });
@@ -57,8 +60,10 @@ export function view(state) {
     html += `<section class="card"><h2>Stufe conversion</h2>`
       + `<p class="muted">Used only to fold Stufe work into your kilogram volume totals. Your logged Stufe numbers never change.</p><ul class="list">`;
     stufeExercises.forEach(ex => {
-      html += `<li><span class="li-t grow">${esc(ex.name)}</span>`
-        + `<label class="mini">1 St. =<input type="number" min="0.1" step="0.5" value="${kgPerStufe(ex)}" data-field="kg-per-stufe" data-id="${ex.id}" data-focus="kps-${ex.id}" inputmode="decimal">kg</label></li>`;
+      const sid = `stufe-${ex.id}`;
+      html += `<li${lockAttr(state, sid)}><span class="li-t grow">${esc(ex.name)}</span>`
+        + `<label class="mini">1 St. =<input type="number" min="0.1" step="0.5" value="${kgPerStufe(ex)}" data-field="kg-per-stufe" data-id="${ex.id}" data-focus="kps-${ex.id}" inputmode="decimal"${disabledAttr(state, sid)}>kg</label>`
+        + lockButton(state, sid) + `</li>`;
     });
     html += `</ul></section>`;
   }

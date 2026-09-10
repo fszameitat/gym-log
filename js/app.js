@@ -20,14 +20,20 @@ import { metricsFor } from './views/exercise-progress.js';
 // tab opens where you left it; a failed read must never stop the app booting.
 function loadUi() {
   const fallback = { progressExerciseId: null, progressBucket: 'session', progressMetric: 'maxLoad' };
+  // unlockedId is deliberately NOT restored: every screen opens fully locked.
   try {
     const raw = localStorage.getItem('gymlog.ui');
-    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
-  } catch { return fallback; }
+    const saved = raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+    saved.unlockedId = null;
+    return saved;
+  } catch { return { ...fallback, unlockedId: null }; }
 }
 
 function saveUi() {
-  try { localStorage.setItem('gymlog.ui', JSON.stringify(state.ui)); } catch { /* private mode */ }
+  try {
+    const { unlockedId, ...persist } = state.ui;   // which block is open is per-visit only
+    localStorage.setItem('gymlog.ui', JSON.stringify(persist));
+  } catch { /* private mode */ }
 }
 
 export const state = {
@@ -542,6 +548,12 @@ const ACTIONS = {
   },
 
   'rest-start'(el) { restTimer.start(num(el.dataset.secs, DEFAULT_REST_SECONDS)); },
+  'toggle-lock'(el) {
+    const id = el.dataset.val;
+    state.ui.unlockedId = state.ui.unlockedId === id ? null : id;
+    render();
+  },
+
   'set-bucket'(el) { state.ui.progressBucket = el.dataset.val; saveUi(); render(); },
   'set-metric'(el) { state.ui.progressMetric = el.dataset.val; saveUi(); render(); },
 
@@ -714,7 +726,25 @@ document.addEventListener('keydown', (ev) => {
   if (btn) { ev.preventDefault(); btn.click(); }
 });
 
-window.addEventListener('hashchange', () => { state.route = parseHash(); render(); });
+// A tap on a locked block opens it (and closes whichever was open). Real controls — links,
+// buttons, selects and already-live inputs — are left alone, so ticking a set off still works
+// while everything is locked. Locked inputs have pointer-events:none, so a tap on one lands
+// on the row instead and reaches this handler.
+document.addEventListener('click', (ev) => {
+  const holder = ev.target.closest('[data-lock-id]');
+  if (!holder) return;
+  if (ev.target.closest('a, button, select, input, textarea, [data-act]')) return;
+  const id = holder.dataset.lockId;
+  if (state.ui.unlockedId === id) return;
+  state.ui.unlockedId = id;
+  render();
+});
+
+window.addEventListener('hashchange', () => {
+  state.route = parseHash();
+  state.ui.unlockedId = null;   // a new screen always starts locked
+  render();
+});
 document.getElementById('back').addEventListener('click', () => history.back());
 
 /* ---------- boot ---------- */

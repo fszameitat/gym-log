@@ -262,7 +262,12 @@ export function progressSeries(sets, opts) {
       default:
         for (const s of rows) value += setVolume(s);
     }
-    series.push({ key, label: labelFor(key, o.bucket, at), value: Math.round(value * 100) / 100, at });
+    // A bucket worth 0 holds nothing countable for this metric — a session that was started
+    // and never filled in, or sets ticked off with no numbers. Plotting it as a zero makes an
+    // abandoned workout look like a total collapse, so it is left out entirely.
+    if (value > 0) {
+      series.push({ key, label: labelFor(key, o.bucket, at), value: Math.round(value * 100) / 100, at });
+    }
   }
 
   return series.sort((a, b) => a.at - b.at);

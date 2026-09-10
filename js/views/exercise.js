@@ -5,6 +5,7 @@ import { esc, fmtDate, fmtKg, fmtVolume } from '../fmt.js';
 import { exerciseSummary, personalRecords } from '../stats.js';
 import { unitOf, formatLoad, describeSet, kgPerStufe } from '../units.js';
 import { exerciseProgress } from './exercise-progress.js';
+import { lockAttr, disabledAttr, lockButton } from '../lock.js';
 import { suggest } from '../coach.js';
 import { coachBlock } from './coach-block.js';
 
@@ -71,7 +72,9 @@ export function view(state) {
   // week and month, so the old fixed charts that used to sit here only showed everything twice.
   html += exerciseProgress(state, ex, { showPicker: false });
 
-  html += `<section class="card"><h2>Notes</h2><textarea rows="3" data-field="exercise-notes" data-id="${ex.id}" data-focus="en-${ex.id}" placeholder="Cues, setup, niggles...">${esc(ex.notes || '')}</textarea></section>`;
+  const nid = `exnotes-${ex.id}`;
+  html += `<section${lockAttr(state, nid, 'card')}><div class="row"><h2 class="grow">Notes</h2>${lockButton(state, nid)}</div>`
+    + `<textarea rows="3" data-field="exercise-notes" data-id="${ex.id}" data-focus="en-${ex.id}" placeholder="Cues, setup, niggles..."${disabledAttr(state, nid)}>${esc(ex.notes || '')}</textarea></section>`;
 
   const history = Array.from(doneSets.reduce((acc, s) => {
     if (!acc.has(s.sessionId)) acc.set(s.sessionId, []);
@@ -81,7 +84,7 @@ export function view(state) {
     .sort((a, b) => ((sessions.get(b[0]) || {}).startedAt || 0) - ((sessions.get(a[0]) || {}).startedAt || 0))
     .slice(0, 14);
 
-  html += `<section class="card"><h2>History</h2><ul class="list">`;
+  html += `<section class="card"><h2>History</h2><ul class="list history">`;
   if (history.length === 0) {
     html += `<li class="muted">No logged sets yet.</li>`;
   } else {

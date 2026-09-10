@@ -1,10 +1,10 @@
-const CACHE = 'gymlog-v7';
+const CACHE = 'gymlog-v8';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
   './js/app.js', './js/db.js', './js/stats.js', './js/series.js',
   './js/charts.js', './js/fmt.js', './js/timer.js',
   './js/units.js', './js/seed-history.js',
-  './js/coach.js', './js/csv.js', './js/catalog.js',
+  './js/coach.js', './js/csv.js', './js/catalog.js', './js/lock.js',
   './js/views/home.js', './js/views/routines.js', './js/views/exercises.js',
   './js/views/exercise.js', './js/views/session.js', './js/views/progress.js',
   './js/views/coach-block.js',

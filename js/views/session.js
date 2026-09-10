@@ -6,8 +6,11 @@ import { totalVolume } from '../stats.js';
 import { unitOf } from '../units.js';
 import { suggest } from '../coach.js';
 import { coachBlock } from './coach-block.js';
+import { lockAttr, disabledAttr, lockButton } from '../lock.js';
 
-function block(session, eid, ex, rows, tip, ph) {
+function block(state, session, eid, ex, rows, tip, ph) {
+  const lid = `ex-${eid}`;
+  const off = disabledAttr(state, lid);
   const name = ex ? ex.name : 'Removed exercise';
   const u = unitOf(ex);
   const loadLabel = u.short;
@@ -21,10 +24,10 @@ function block(session, eid, ex, rows, tip, ph) {
   const body = rows.map((r, i) => {
     // Bodyweight work has nothing to put in a load box, so it does not get one.
     const load = u.hasLoad
-      ? `<td><input type="number" step="${u.step}" min="0" inputmode="decimal" value="${num(r.weight)}" placeholder="${esc(wPh)}" data-field="weight" data-id="${r.id}" data-focus="w-${r.id}" aria-label="${esc(u.label)}"></td><td class="unit">${esc(loadLabel)}</td>`
+      ? `<td><input type="number" step="${u.step}" min="0" inputmode="decimal" value="${num(r.weight)}" placeholder="${esc(wPh)}" data-field="weight" data-id="${r.id}" data-focus="w-${r.id}"${off} aria-label="${esc(u.label)}"></td><td class="unit">${esc(loadLabel)}</td>`
       : `<td colspan="2" class="unit bw">bodyweight</td>`;
     const reps = u.hasReps
-      ? `<td><input type="number" step="1" min="0" inputmode="numeric" value="${num(r.reps)}" data-field="reps" data-id="${r.id}" data-focus="p-${r.id}" aria-label="Reps" placeholder="${esc(rPh)}"></td><td class="unit">reps</td>`
+      ? `<td><input type="number" step="1" min="0" inputmode="numeric" value="${num(r.reps)}" data-field="reps" data-id="${r.id}" data-focus="p-${r.id}"${off} aria-label="Reps" placeholder="${esc(rPh)}"></td><td class="unit">reps</td>`
       : `<td colspan="2"></td>`;
     return `<tr class="${r.done ? 'done' : ''}"><td class="idx">${i + 1}</td>${load}${reps}`
       + `<td><button class="check${r.done ? ' on' : ''}" data-act="toggle-done" data-id="${r.id}" aria-label="Done">&#10003;</button></td>`
@@ -41,7 +44,7 @@ function block(session, eid, ex, rows, tip, ph) {
     : u.id === 'body'   ? `${Math.round(sum(r => r.reps))} reps`
     : fmtVolume(totalVolume(rows));
 
-  return `<section class="card ex"><div class="row"><h2 class="grow"><a href="#/exercise/${eid}">${esc(name)}</a></h2><span class="muted">${summary}</span></div>`
+  return `<section${lockAttr(state, lid, 'card ex')}><div class="row"><h2 class="grow"><a href="#/exercise/${eid}">${esc(name)}</a></h2><span class="muted">${summary}</span>${lockButton(state, lid)}</div>`
     + (tip || '')
     + `<table class="sets"><tbody>${body}</tbody></table>`
     + `<button class="ghost" data-act="add-set" data-sid="${session.id}" data-eid="${eid}">+ Add set</button></section>`;
@@ -60,6 +63,10 @@ export function view(state) {
     + (s.endedAt ? `<span class="muted">finished</span>` : `<button class="primary" data-act="finish-session" data-id="${s.id}">Finish</button>`)
     + `</div><p class="muted">${fmtDateTime(s.startedAt)} &middot; ${doneCount}/${sets.length} sets done &middot; ${fmtVolume(totalVolume(sets))}</p></section>`;
 
+  if (!s.endedAt && !(state.ui && state.ui.unlockedId)) {
+    html += `<p class="lockhint">Fields are locked while you scroll — tap an exercise to edit it.</p>`;
+  }
+
   if (state.rest.running) {
     html += `<div class="rest live"><b>${clock(state.rest.remaining)}</b><button class="ghost" data-act="rest-add" data-secs="30">+30s</button><button class="ghost" data-act="rest-stop">Stop</button></div>`;
   } else {
@@ -76,14 +83,16 @@ export function view(state) {
     // screen without being pre-typed into the row.
     const done = history.filter(x => x.done === true && Number(x.weight) > 0);
     const ph = done.length ? done[done.length - 1] : null;
-    html += block(s, eid, ex, sets.filter(x => x.exerciseId === eid), tip, ph);
+    html += block(state, s, eid, ex, sets.filter(x => x.exerciseId === eid), tip, ph);
   }
 
   html += `<section class="card"><div class="form"><select id="session-add-select">`
     + state.exercises.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')
     + `</select><button class="primary" data-act="session-add-exercise" data-sid="${s.id}">Add exercise</button></div></section>`;
 
-  html += `<section class="card"><h2>Notes</h2><textarea rows="3" data-field="session-notes" data-id="${s.id}" data-focus="n-${s.id}" placeholder="How did it go?">${esc(s.notes || '')}</textarea></section>`;
+  const nid = `notes-${s.id}`;
+  html += `<section${lockAttr(state, nid, 'card')}><div class="row"><h2 class="grow">Notes</h2>${lockButton(state, nid)}</div>`
+    + `<textarea rows="3" data-field="session-notes" data-id="${s.id}" data-focus="n-${s.id}" placeholder="How did it go?"${disabledAttr(state, nid)}>${esc(s.notes || '')}</textarea></section>`;
 
   return html;
 }
