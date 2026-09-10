@@ -13,12 +13,28 @@ import { view as exercisesView } from './views/exercises.js';
 import { view as exerciseView } from './views/exercise.js';
 import { view as sessionView } from './views/session.js';
 import { view as progressView } from './views/progress.js';
+import { metricsFor } from './views/exercise-progress.js';
 
+
+// Which exercise / span / metric the Progress tab is showing. Remembered per device so the
+// tab opens where you left it; a failed read must never stop the app booting.
+function loadUi() {
+  const fallback = { progressExerciseId: null, progressBucket: 'session', progressMetric: 'maxLoad' };
+  try {
+    const raw = localStorage.getItem('gymlog.ui');
+    return raw ? { ...fallback, ...JSON.parse(raw) } : fallback;
+  } catch { return fallback; }
+}
+
+function saveUi() {
+  try { localStorage.setItem('gymlog.ui', JSON.stringify(state.ui)); } catch { /* private mode */ }
+}
 
 export const state = {
   route: { name: 'home', id: null },
   exercises: [], routines: [], sessions: [], sets: [],
   rest: { running: false, remaining: 0, total: 0 },
+  ui: loadUi(),
   editingRoutine: null,   // which routine's exercise picker is open
   catalogQuery: '', catalogGroup: '',
   ready: false,
@@ -526,6 +542,9 @@ const ACTIONS = {
   },
 
   'rest-start'(el) { restTimer.start(num(el.dataset.secs, DEFAULT_REST_SECONDS)); },
+  'set-bucket'(el) { state.ui.progressBucket = el.dataset.val; saveUi(); render(); },
+  'set-metric'(el) { state.ui.progressMetric = el.dataset.val; saveUi(); render(); },
+
   'rest-stop'() { restTimer.stop(); render(); },
   'rest-add'(el) { restTimer.addSeconds(num(el.dataset.secs, 30)); },
 
@@ -593,6 +612,13 @@ document.addEventListener('change', async (ev) => {
       : field === 'reps' ? Math.max(0, Math.round(num(raw))) : Math.max(0, num(raw));
     await updateSet(el.dataset.id, { [field]: v });
     await loadAll();
+    render();
+  } else if (field === 'progress-exercise') {
+    state.ui.progressExerciseId = el.value || null;
+    // the metric list differs per unit, so drop one the newly picked exercise cannot show
+    const allowed = metricsFor(exerciseById(el.value)).map((m) => m.id);
+    if (!allowed.includes(state.ui.progressMetric)) state.ui.progressMetric = allowed[0];
+    saveUi();
     render();
   } else if (field === 'session-notes') {
     const s = sessionById(el.dataset.id);

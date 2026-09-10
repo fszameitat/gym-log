@@ -3,7 +3,25 @@ import { esc, fmtKg, fmtVolume } from '../fmt.js';
 import { totalVolume, personalRecords } from '../stats.js';
 import { volumeByWeek, sessionsPerWeek, movingAverage } from '../series.js';
 import { lineChart, barChart } from '../charts.js';
+import { exerciseProgress } from './exercise-progress.js';
 import { unitOf } from '../units.js';
+
+/** Whichever exercise the Progress tab should chart: the remembered one, else whichever has
+ *  the most logged sets, so the panel is useful the first time it is opened. */
+function pickExercise(state) {
+  const remembered = state.exercises.find((e) => e.id === (state.ui || {}).progressExerciseId);
+  if (remembered) return remembered;
+  const counts = new Map();
+  for (const s of state.sets) {
+    if (s.done === true) counts.set(s.exerciseId, (counts.get(s.exerciseId) || 0) + 1);
+  }
+  let best = null; let bestN = -1;
+  for (const e of state.exercises) {
+    const n = counts.get(e.id) || 0;
+    if (n > bestN) { bestN = n; best = e; }
+  }
+  return best || state.exercises[0];
+}
 
 export function view(state) {
   const sets = state.sets;
@@ -26,6 +44,8 @@ export function view(state) {
       <div class="tile"><b>${fmtVolume(totalVolume(sets))}</b><span>lifetime volume</span></div>
       <div class="tile"><b>${sets.filter(s => s.done === true).length}</b><span>sets logged</span></div>
     </section>
+
+    ${exerciseProgress(state, pickExercise(state), { showPicker: true })}
 
     <section class="card"><h2>Weekly volume</h2><div class="chart">${barChart(weeks, { width: 340, height: 190, label: 'Volume per week in kilograms', empty: 'Finish a workout to start this chart' })}</div></section>
 

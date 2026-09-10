@@ -251,3 +251,25 @@ li.ex-row { display: block; padding: 10px 0; }
 li.ex-row .li-t { display: block; font-size: 15px; margin-bottom: 7px; }
 .ex-controls { display: flex; align-items: center; gap: 10px; }
 .ex-controls .mini { margin: 0; }
+
+/* Segmented controls for the time span / metric switches on the progress panel. */
+.chips.seg { gap: 6px; margin-bottom: 10px; }
+.chips.seg .chip { padding: 7px 12px; font-size: 13px; }
+
+/* Change against the previous session / week / month. */
+.delta { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; white-space: nowrap; }
+.delta em { font-style: normal; font-weight: 500; font-size: 11px; opacity: 0.75; }
+.delta.up { color: var(--good); }
+.delta.down { color: var(--danger); }
+.delta.flat { color: var(--muted); }
+.tile .delta { font-size: 17px; }
+
+/* Denser list for the bucket-by-bucket breakdown. */
+ul.list.compact li { padding: 7px 0; }
+ul.list.compact .li-t { font-size: 14px; font-weight: 600; }
+ul.list.compact .li-s { display: flex; align-items: center; gap: 8px; }
+
+/* Tiles inside a card have less room than page-level tiles; let four fit a phone row. */
+.card .tiles { grid-template-columns: repeat(auto-fit, minmax(68px, 1fr)); gap: 8px; }
+.card .tiles .tile { padding: 10px 6px; }
+.card .tiles b { font-size: 16px; }

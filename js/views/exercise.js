@@ -3,9 +3,8 @@
 // sense for kilograms, so Stufe shows level progression and timed holds show seconds.
 import { esc, fmtDate, fmtKg, fmtVolume } from '../fmt.js';
 import { exerciseSummary, personalRecords } from '../stats.js';
-import { best1RMByDay, volumeByDay, maxLoadByDay, loadSumByDay, bestRepsByDay, repsSumByDay } from '../series.js';
-import { lineChart, barChart } from '../charts.js';
 import { unitOf, formatLoad, describeSet, kgPerStufe } from '../units.js';
+import { exerciseProgress } from './exercise-progress.js';
 import { suggest } from '../coach.js';
 import { coachBlock } from './coach-block.js';
 
@@ -68,23 +67,9 @@ export function view(state) {
       + `<div class="tile"><b>${sessionCount}</b><span>sessions</span></div></section>`;
   }
 
-  // --- charts, per unit ---
-  if (u.id === 'time') {
-    html += `<section class="card"><h2>Longest hold</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Longest hold in seconds', empty: 'Log a hold to start this chart' })}</div></section>`;
-    html += `<section class="card"><h2>Total seconds per session</h2><div class="chart">${barChart(loadSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Total seconds held per session', empty: 'Log a hold to start this chart' })}</div></section>`;
-  } else if (u.id === 'cardio') {
-    html += `<section class="card"><h2>Longest piece</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Longest cardio piece in minutes', empty: 'Log a piece to start this chart' })}</div></section>`;
-    html += `<section class="card"><h2>Minutes per session</h2><div class="chart">${barChart(loadSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Cardio minutes per session', empty: 'Log a piece to start this chart' })}</div></section>`;
-  } else if (u.id === 'body') {
-    html += `<section class="card"><h2>Best set</h2><div class="chart">${lineChart(bestRepsByDay(sets).slice(-14), { width: 340, height: 180, label: 'Best single set in reps', empty: 'Log a set to start this chart' })}</div></section>`;
-    html += `<section class="card"><h2>Total reps per session</h2><div class="chart">${barChart(repsSumByDay(sets).slice(-12), { width: 340, height: 180, label: 'Total reps per session', empty: 'Log a set to start this chart' })}</div></section>`;
-  } else if (u.id === 'stufe') {
-    html += `<section class="card"><h2>Level reached</h2><div class="chart">${lineChart(maxLoadByDay(sets).slice(-14), { width: 340, height: 180, label: 'Highest Stufe reached', empty: 'Log a set to start this chart' })}</div></section>`;
-    html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, label: 'Volume per session in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;
-  } else {
-    html += `<section class="card"><h2>Estimated 1RM</h2><div class="chart">${lineChart(best1RMByDay(sets).slice(-14), { width: 340, height: 180, label: 'Estimated one-rep max in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;
-    html += `<section class="card"><h2>Volume per session day</h2><div class="chart">${barChart(volumeByDay(sets).slice(-12), { width: 340, height: 180, label: 'Volume per session in kilograms', empty: 'Log a set to start this chart' })}</div></section>`;
-  }
+  // The Exercise progress panel draws these same curves and lets you switch between session,
+  // week and month, so the old fixed charts that used to sit here only showed everything twice.
+  html += exerciseProgress(state, ex, { showPicker: false });
 
   html += `<section class="card"><h2>Notes</h2><textarea rows="3" data-field="exercise-notes" data-id="${ex.id}" data-focus="en-${ex.id}" placeholder="Cues, setup, niggles...">${esc(ex.notes || '')}</textarea></section>`;
 

@@ -1,4 +1,4 @@
-const CACHE = 'gymlog-v6';
+const CACHE = 'gymlog-v7';
 const ASSETS = [
   './', './index.html', './styles.css', './manifest.json',
   './js/app.js', './js/db.js', './js/stats.js', './js/series.js',
@@ -8,6 +8,7 @@ const ASSETS = [
   './js/views/home.js', './js/views/routines.js', './js/views/exercises.js',
   './js/views/exercise.js', './js/views/session.js', './js/views/progress.js',
   './js/views/coach-block.js',
+  './js/views/exercise-progress.js',
   './icons/icon-192.png', './icons/icon-512.png',
 ];
 
